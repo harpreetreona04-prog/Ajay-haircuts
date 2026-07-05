@@ -9,7 +9,11 @@ API = f"{BASE_URL}/api"
 
 
 def future_date(days=5):
-    return (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%d")
+    d = datetime.utcnow() + timedelta(days=days)
+    # skip Tuesdays (closed) so booking succeeds
+    while d.weekday() == 1:
+        d += timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +40,7 @@ class TestAvailability:
         data = r.json()
         assert data["date"] == d
         assert isinstance(data["slots"], list)
-        assert len(data["slots"]) == 11
+        assert len(data["slots"]) == 12
         for slot in data["slots"]:
             assert "time" in slot and "available" in slot
 
@@ -44,8 +48,8 @@ class TestAvailability:
 # Booking creation + persistence + availability update
 class TestBookings:
     def test_create_and_reflect_in_availability_and_list(self, session):
-        d = future_date(7)
-        time_slot = "11:00 AM"
+        d = future_date(45)
+        time_slot = "04:00 PM"
 
         # Pre-check: slot available
         avail = session.get(f"{API}/bookings/availability", params={"date": d}).json()

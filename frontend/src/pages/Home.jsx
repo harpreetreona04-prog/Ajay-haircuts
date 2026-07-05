@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navbar } from "../components/Navbar";
 import { Hero } from "../components/Hero";
 import { Services } from "../components/Services";
@@ -13,7 +13,24 @@ import { CalendarCheck } from "lucide-react";
 
 export default function Home() {
   const [bookOpen, setBookOpen] = useState(false);
-  const openBook = () => setBookOpen(true);
+  const [resumeSessionId, setResumeSessionId] = useState(null);
+  const openBook = () => { setResumeSessionId(null); setBookOpen(true); };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get("session_id");
+    if (sid) {
+      setResumeSessionId(sid);
+      setBookOpen(true);
+      // Clean the URL so a refresh doesn't re-trigger
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  const handleOpenChange = (v) => {
+    setBookOpen(v);
+    if (!v) setResumeSessionId(null);
+  };
 
   return (
     <div className="bg-[#FAFAFA] min-h-screen">
@@ -37,7 +54,7 @@ export default function Home() {
         <CalendarCheck size={16} /> Book Now
       </button>
 
-      <BookingDialog open={bookOpen} onOpenChange={setBookOpen} />
+      <BookingDialog open={bookOpen} onOpenChange={handleOpenChange} resumeSessionId={resumeSessionId} />
       <Toaster position="top-center" richColors />
     </div>
   );
