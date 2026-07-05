@@ -1,0 +1,144 @@
+{
+  "project_name": "Ajay Haircut",
+  "domain": "Premium Men's Barber Shop",
+  "theme": "light",
+  "archetype": "Modern Light Luxury (Archetype 5 adapted for Light)",
+  "emotional_tone": "Clean, premium, professional, experienced, sophisticated",
+  "design_rules": {
+    "colors": {
+      "background": "#FAFAFA",
+      "surface": "#FFFFFF",
+      "surface_muted": "#F3F4F6",
+      "primary": "#111827",
+      "secondary": "#4B5563",
+      "accent": "#C5A059",
+      "accent_hover": "#B08D4B",
+      "border": "#E5E7EB",
+      "border_accent": "rgba(197, 160, 89, 0.3)",
+      "text": {
+        "primary": "#111827",
+        "secondary": "#4B5563",
+        "inverse": "#FFFFFF",
+        "accent": "#C5A059"
+      }
+    },
+    "typography": {
+      "heading_font": "Playfair Display",
+      "heading_font_fallback": "serif",
+      "body_font": "Manrope",
+      "body_font_fallback": "sans-serif",
+      "strategy": "Oversized, high-contrast serif headlines to establish luxury, paired with highly readable geometric sans-serif for body copy and booking details.",
+      "scales": {
+        "h1": "text-5xl md:text-6xl lg:text-7xl tracking-tighter leading-none",
+        "h2": "text-4xl md:text-5xl tracking-tight leading-tight",
+        "h3": "text-2xl md:text-3xl tracking-tight",
+        "h4": "text-xl md:text-2xl font-medium",
+        "body": "text-base md:text-lg leading-relaxed",
+        "overline": "text-sm md:text-base uppercase tracking-[0.2em] font-semibold text-[#C5A059]"
+      }
+    },
+    "spacing_and_layout": {
+      "philosophy": "Generous spacing. Create 'breathing room' around images and text to convey luxury. Use asymmetrical layouts for the gallery to avoid a 'stock template' feel.",
+      "section_padding": "py-24 md:py-32",
+      "container_width": "max-w-7xl mx-auto px-6 md:px-12",
+      "grid_strategy": "Use Bento grid variants for services, mixing spans (e.g., col-span-2 and col-span-1) to create visual tension and hierarchy."
+    },
+    "components": {
+      "buttons": {
+        "primary": "bg-[#111827] text-white hover:bg-[#C5A059] transition-colors duration-300 rounded-none px-8 py-4 font-medium tracking-wide",
+        "secondary": "bg-transparent border border-[#C5A059] text-[#111827] hover:bg-[#C5A059] hover:text-white transition-colors duration-300 rounded-none px-8 py-4 font-medium tracking-wide",
+        "ghost": "text-[#111827] hover:text-[#C5A059] transition-colors duration-300 font-medium underline-offset-4 hover:underline"
+      },
+      "cards": {
+        "service_card": "bg-white p-8 md:p-12 border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300 rounded-none group",
+        "testimonial_card": "bg-[#FAFAFA] p-8 md:p-10 border border-[#C5A059]/20 rounded-none"
+      },
+      "navigation": {
+        "style": "Sticky top, crystal glassmorphism effect (backdrop-blur-xl bg-white/80). Bottom border 1px solid rgba(0,0,0,0.05).",
+        "links": "text-sm uppercase tracking-widest font-medium text-gray-800 hover:text-[#C5A059]"
+      },
+      "form_elements": {
+        "input": "border-b border-gray-300 bg-transparent rounded-none px-0 py-3 focus:border-[#C5A059] focus:ring-0 text-lg transition-colors",
+        "label": "text-sm text-gray-500 font-medium tracking-wide uppercase"
+      }
+    },
+    "icons_and_assets": {
+      "library": "lucide-react",
+      "stroke_width": 1.5,
+      "style": "Minimal, sharp, consistent sizing."
+    },
+    "motion": {
+      "philosophy": "Smooth, subtle, and expensive.",
+      "transitions": "opacity 0.4s ease, transform 0.4s cubic-bezier(0.25, 1, 0.5, 1)",
+      "hover_effects": "Slight upward translation (-translate-y-1) for service cards, image scale-up on hover inside hidden overflow containers."
+    }
+  },
+  "content_strategy": {
+    "hero": {
+      "headline": "Premium Men's Haircuts & Beard Grooming in Surrey",
+      "subheadline": "Over 11 years of master barbering experience. Precision cuts, straight razor shaves, and tailored grooming for the modern gentleman.",
+      "ctas": ["Book Appointment", "Call Now"]
+    },
+    "services": [
+      "Men's Haircuts", "Skin Fades", "Beard Trimming & Styling", "Hair & Beard Perms", "Men's Facial Treatments", "Hair Styling", "Kids Haircuts", "Hair Wash & Styling"
+    ],
+    "business_info": {
+      "name": "Ajay Haircut",
+      "location": "Surrey, BC Canada",
+      "phone": "(778) 344-2550",
+      "experience": "11+ Years"
+    }
+  },
+  "media": {
+    "images": {
+      "logo": {
+        "url": "https://images.unsplash.com/photo-1597979732130-9d2ad18df38b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxNzV8MHwxfHNlYXJjaHwyfHxnb2xkJTIwbG9nbyUyMG1pbmltYWx8ZW58MHx8fHwxNzgzMjg0OTE3fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimal text logo styling to be used as inspiration for text-based 'Ajay Haircut' logo.",
+        "category": "branding"
+      },
+      "hero_background": {
+        "url": "https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg",
+        "description": "Close-up of a barber styling a bearded man's hair indoors.",
+        "category": "hero"
+      },
+      "service_haircut": {
+        "url": "https://images.pexels.com/photos/4625626/pexels-photo-4625626.jpeg",
+        "description": "Barber performing a stylish haircut on a man.",
+        "category": "services"
+      },
+      "service_beard": {
+        "url": "https://images.unsplash.com/photo-1654097800183-574ba7368f74",
+        "description": "Man getting his beard trimmed in a barbershop.",
+        "category": "services"
+      },
+      "service_facial": {
+        "url": "https://images.unsplash.com/photo-1728949202477-bad2935775cb",
+        "description": "A man getting a facial mask treatment.",
+        "category": "services"
+      },
+      "interior_about": {
+        "url": "https://images.pexels.com/photos/7195814/pexels-photo-7195814.jpeg",
+        "description": "Spacious stylish barbershop interior with black chairs and bright glowing lamps.",
+        "category": "about"
+      },
+      "gallery_1": {
+        "url": "https://images.unsplash.com/photo-1759134198561-e2041049419c",
+        "description": "Barbers cutting hair in a modern salon.",
+        "category": "gallery"
+      },
+      "gallery_2": {
+        "url": "https://images.unsplash.com/photo-1759134155377-4207d89b39ec",
+        "description": "Two barbers stand at the entrance of a shop.",
+        "category": "gallery"
+      }
+    }
+  },
+  "instructions_to_main_agent": {
+    "1": "Use custom Tailwind classes combined with pure HTML for the Marketing sections (Hero, About, Gallery) to achieve the overlapping asymmetrical look described in layout philosophy.",
+    "2": "Integrate Shadcn UI strictly for the Booking Flow (Form, Inputs, Select for services, Datepicker) and interactive elements like Dialog/Modal if the booking is contained in a modal.",
+    "3": "Enforce the light luxury theme: use #FAFAFA and #FFFFFF heavily, text must be high contrast #111827. Gold (#C5A059) is for accents, overlines, and hover states, NOT large background areas.",
+    "4": "Make sure all interactive and key informational elements have the 'data-testid' attribute (e.g., data-testid='book-now-cta', data-testid='service-select').",
+    "5": "Do not center everything. Use left-aligned robust headings for 'About' and 'Services' to create editorial tension.",
+    "6": "In the booking form, use a multi-step stepper or cleanly separated stacked layout. Include Service, Date/Time, Personal Info, and a visually distinct Confirmation screen."
+  }
+}
