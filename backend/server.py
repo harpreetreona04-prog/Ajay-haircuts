@@ -98,10 +98,37 @@ def _confirmation_html(b: Booking) -> str:
     """
 
 
+def _owner_html(b: Booking) -> str:
+    notes_block = f'<div style="margin-top:20px;padding:16px;background:#FAFAFA;border:1px solid #E5E7EB;color:#4B5563;font-size:14px;"><strong>Notes:</strong> {b.notes}</div>' if b.notes else ''
+    return f"""
+    <div style="font-family: Arial, Helvetica, sans-serif; background:#FAFAFA; padding:32px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;">
+        <tr><td style="background:#111827;padding:24px 32px;">
+          <span style="color:#C5A059;font-size:13px;letter-spacing:2px;text-transform:uppercase;font-weight:700;">New Appointment</span>
+          <h1 style="color:#ffffff;font-size:22px;margin:6px 0 0;">You have a new booking</h1>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr><td style="padding:12px 0;color:#6B7280;font-size:13px;">Service</td><td style="padding:12px 0;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.service}</td></tr>
+            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Date</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.date}</td></tr>
+            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Time</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.time}</td></tr>
+            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Customer</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.name}</td></tr>
+            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Phone</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;"><a href="tel:{b.phone}" style="color:#C5A059;text-decoration:none;">{b.phone}</a></td></tr>
+            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Email</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.email}</td></tr>
+          </table>
+          {notes_block}
+        </td></tr>
+      </table>
+    </div>
+    """
+
+
+
 async def _send_confirmation(b: Booking):
     if not RESEND_API_KEY:
         logger.warning("RESEND_API_KEY not set; skipping email")
         return
+    # Customer confirmation
     params = {
         "from": f"Ajay Haircut <{SENDER_EMAIL}>",
         "to": [b.email],
@@ -113,6 +140,20 @@ async def _send_confirmation(b: Booking):
         logger.info(f"Confirmation email sent to {b.email}")
     except Exception as e:
         logger.error(f"Failed to send confirmation email: {e}")
+
+    # Owner notification
+    if OWNER_EMAIL:
+        owner_params = {
+            "from": f"Ajay Haircut Bookings <{SENDER_EMAIL}>",
+            "to": [OWNER_EMAIL],
+            "subject": f"New Booking: {b.service} — {b.date} {b.time}",
+            "html": _owner_html(b),
+        }
+        try:
+            await asyncio.to_thread(resend.Emails.send, owner_params)
+            logger.info(f"Owner notification sent to {OWNER_EMAIL}")
+        except Exception as e:
+            logger.error(f"Failed to send owner notification: {e}")
 
 
 @api_router.get("/")
