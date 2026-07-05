@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Dialog, DialogContent } from "./ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Check, ChevronRight, ChevronLeft, CalendarDays, Clock, Scissors, Loader2, PartyPopper } from "lucide-react";
 import { SERVICES, BUSINESS } from "../data/site";
 
@@ -60,6 +60,8 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden border-0 bg-white rounded-none" data-testid="booking-dialog">
+        <DialogTitle className="sr-only">Book an Appointment at Ajay Haircut</DialogTitle>
+        <DialogDescription className="sr-only">Choose a service, pick a date and time, and enter your details to book your appointment.</DialogDescription>
         <div className="bg-[#111827] px-6 py-5">
           <p className="text-[#C5A059] text-[10px] uppercase tracking-[0.3em] font-bold">Ajay Haircut · Surrey BC</p>
           <h2 className="text-white font-display text-2xl font-bold mt-1">Book an Appointment</h2>
