@@ -3,41 +3,67 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#000000" />
-        <meta name="description" content="A product of emergent.sh" />
+        <meta name="theme-color" content="#111827" />
+
+        <title>Ajay Haircut | Best Barber in Surrey BC — Men's Haircuts, Fades & Beard Trims</title>
+        <meta name="description" content="Ajay Haircut is Surrey's premium men's barber with 11+ years of experience. Book men's haircuts, skin fades, beard trims, hair & beard perms, and men's facials. Call (778) 344-2550." />
+        <meta name="keywords" content="Barber Surrey BC, Men's Haircuts Surrey, Beard Trim Surrey, Hair Perm Surrey, Beard Perm Surrey, Men's Facial Surrey, Best Barber Surrey, Fade Haircut Surrey, Barber Near Me" />
+        <link rel="canonical" href="https://fade-master-49.preview.emergentagent.com/" />
+        <meta name="robots" content="index, follow" />
+
+        <!-- Open Graph -->
+        <meta property="og:type" content="business.business" />
+        <meta property="og:title" content="Ajay Haircut | Premium Men's Barber in Surrey, BC" />
+        <meta property="og:description" content="Precision haircuts, skin fades, beard styling, perms & men's facials. 11+ years of experience in Surrey, BC. Book online today." />
+        <meta property="og:image" content="https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg" />
+        <meta property="og:site_name" content="Ajay Haircut" />
+        <meta property="og:locale" content="en_CA" />
+
+        <!-- Twitter -->
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Ajay Haircut | Premium Men's Barber in Surrey, BC" />
+        <meta name="twitter:description" content="Men's haircuts, fades, beard trims, perms & facials in Surrey, BC. Book online." />
+        <meta name="twitter:image" content="https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg" />
+
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@600&display=swap" rel="stylesheet" />
-        <!--
-        manifest.json provides metadata used when your web app is installed on a
-        user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-        -->
-        <!--
-        Notice the use of %PUBLIC_URL% in the tags above.
-        It will be replaced with the URL of the `public` folder during the build.
-        Only files inside the `public` folder can be referenced from the HTML.
 
-        Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-        work correctly both with client-side routing and a non-root public URL.
-        Learn how to configure a non-root public URL by running `npm run build`.
-        -->
-        <title>Emergent | Fullstack App</title>
+        <!-- LocalBusiness structured data -->
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "HairSalon",
+          "name": "Ajay Haircut",
+          "image": "https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg",
+          "description": "Premium men's barber shop in Surrey, BC offering haircuts, skin fades, beard trims, hair & beard perms, and men's facials. 11+ years of experience.",
+          "telephone": "+17783442550",
+          "priceRange": "$$",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": "Surrey",
+            "addressRegion": "BC",
+            "addressCountry": "CA"
+          },
+          "areaServed": "Surrey, British Columbia",
+          "openingHoursSpecification": [
+            { "@type": "OpeningHoursSpecification", "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday"], "opens": "09:00", "closes": "20:00" },
+            { "@type": "OpeningHoursSpecification", "dayOfWeek": "Saturday", "opens": "09:00", "closes": "18:00" },
+            { "@type": "OpeningHoursSpecification", "dayOfWeek": "Sunday", "opens": "10:00", "closes": "16:00" }
+          ],
+          "sameAs": [
+            "https://www.instagram.com/ajayhaircut11",
+            "https://www.tiktok.com/@ajayhaircut1"
+          ],
+          "aggregateRating": { "@type": "AggregateRating", "ratingValue": "5.0", "reviewCount": "3" }
+        }
+        </script>
+
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
         <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
     </head>
     <body>
         <noscript>You need to enable JavaScript to run this app.</noscript>
         <div id="root"></div>
-        <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
-
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
-
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
         <a
             id="emergent-badge"
             target="_blank"
@@ -147,7 +173,7 @@
             })(document, window.posthog || []);
             posthog.init("phc_xAvL2Iq4tFmANRE7kzbKwaSqp1HJjN7x48s3vr0CMjs", {
                 api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well,
+                person_profiles: "identified_only",
                 session_recording: {
                     recordCrossOriginIframes: true,
                     capturePerformance: false,
