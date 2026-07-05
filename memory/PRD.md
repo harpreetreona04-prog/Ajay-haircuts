@@ -23,7 +23,10 @@ Modern, premium, mobile-first website for a men's barber shop "Ajay Haircut" (Su
 - Tested end-to-end: backend 100%, frontend 100% (iteration_1.json).
 
 ## Backlog / Next
-- P1: Online payments (Stripe: cards/Apple Pay/Google Pay) if user revisits.
+- Payments: REMOVED per user (booking-only, no deposit). Stripe deposit flow was built then reverted on user request.
 - P1: Verify a domain in Resend to email real customers (sandbox only sends to verified/owner addresses).
 - P2: Admin dashboard to view/manage bookings; slot-collision uniqueness guard on (date,time).
 - P2: Real business address + precise map pin; gallery lightbox.
+
+## Email
+- Customer confirmation + owner notification (harpreetreona04@gmail.com) sent via Resend on each booking. Sandbox delivers only to verified owner until a domain is verified.
