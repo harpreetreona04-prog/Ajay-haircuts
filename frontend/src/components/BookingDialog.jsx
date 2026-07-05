@@ -16,6 +16,7 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [slots, setSlots] = useState([]);
+  const [closed, setClosed] = useState(false);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [info, setInfo] = useState({ name: "", email: "", phone: "", notes: "" });
   const [submitting, setSubmitting] = useState(false);
@@ -32,8 +33,8 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
     if (!date) { setSlots([]); return; }
     setSlotsLoading(true); setTime("");
     axios.get(`${API}/bookings/availability`, { params: { date } })
-      .then(({ data }) => setSlots(data.slots))
-      .catch(() => setSlots([]))
+      .then(({ data }) => { setSlots(data.slots); setClosed(!!data.closed); })
+      .catch(() => { setSlots([]); setClosed(false); })
       .finally(() => setSlotsLoading(false));
   }, [date]);
 
@@ -113,7 +114,10 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
               </label>
               {!date && <p className="text-sm text-gray-400">Pick a date to see available times.</p>}
               {slotsLoading && <p className="text-sm text-gray-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading slots…</p>}
-              {date && !slotsLoading && (
+              {date && !slotsLoading && closed && (
+                <p className="text-sm text-red-600 font-medium" data-testid="booking-closed">We're closed on Tuesdays — please pick another day.</p>
+              )}
+              {date && !slotsLoading && !closed && (
                 <div className="grid grid-cols-3 gap-2">
                   {slots.map((s) => (
                     <button key={s.time} disabled={!s.available} onClick={() => setTime(s.time)} data-testid={`slot-${s.time}`}

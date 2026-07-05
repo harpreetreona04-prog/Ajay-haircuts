@@ -13,9 +13,9 @@ export const BUSINESS = {
 };
 
 export const HOURS = [
-  { day: "Monday – Friday", time: "9:00 AM – 8:00 PM" },
-  { day: "Saturday", time: "9:00 AM – 6:00 PM" },
-  { day: "Sunday", time: "10:00 AM – 4:00 PM" },
+  { day: "Monday", time: "9:00 AM – 9:00 PM" },
+  { day: "Tuesday", time: "Closed" },
+  { day: "Wednesday – Sunday", time: "9:00 AM – 9:00 PM" },
 ];
 
 export const IMAGES = {
@@ -28,56 +28,56 @@ export const SERVICES = [
   {
     title: "Men's Haircuts",
     desc: "Precision cuts tailored to your face shape and lifestyle.",
-    price: "from $30",
+    price: "$25",
     img: "https://images.pexels.com/photos/4625626/pexels-photo-4625626.jpeg",
+    icon: "Scissors",
+  },
+  {
+    title: "Haircut & Beard",
+    desc: "Complete refresh — a sharp cut paired with a shaped beard.",
+    price: "$45",
+    img: "https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg",
     icon: "Scissors",
   },
   {
     title: "Skin Fades",
     desc: "Seamless, sharp fades blended to perfection.",
-    price: "from $35",
+    price: "$25",
     img: "https://images.unsplash.com/photo-1647140655214-e4a2d914971f?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
     icon: "Sparkles",
   },
   {
     title: "Beard Trimming & Styling",
     desc: "Shaping, lining and hot-towel detailing for a crisp finish.",
-    price: "from $20",
+    price: "$20",
     img: "https://images.pexels.com/photos/9153970/pexels-photo-9153970.jpeg",
     icon: "Wind",
   },
   {
-    title: "Hair & Beard Perms",
-    desc: "Add texture, curl and volume that lasts for weeks.",
-    price: "from $80",
+    title: "Hair Perms",
+    desc: "Add lasting texture, curl and volume to your hair.",
+    price: "$120",
     img: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
+    icon: "Waves",
+  },
+  {
+    title: "Beard Perms",
+    desc: "Curl and shape your beard for fuller, styled definition.",
+    price: "$120",
+    img: "https://images.unsplash.com/photo-1630827020718-3433092696e7?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
     icon: "Waves",
   },
   {
     title: "Men's Facial Treatments",
     desc: "Deep-cleansing facials designed for men's skin. Men only.",
-    price: "from $45",
+    price: "from $50",
     img: "https://images.unsplash.com/photo-1728949202477-bad2935775cb?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
     icon: "Leaf",
   },
   {
-    title: "Hair Styling",
-    desc: "Finishing, styling and product advice for any occasion.",
-    price: "from $15",
-    img: "https://images.pexels.com/photos/32329619/pexels-photo-32329619.jpeg",
-    icon: "Brush",
-  },
-  {
-    title: "Kids Haircuts",
-    desc: "Patient, friendly cuts for the little gentlemen.",
-    price: "from $20",
-    img: "https://images.unsplash.com/photo-1503951914875-452162b0f3f1?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
-    icon: "Baby",
-  },
-  {
-    title: "Hair Wash & Styling",
+    title: "Styling & Wash",
     desc: "Refreshing wash paired with a clean, polished style.",
-    price: "from $18",
+    price: "$20",
     img: "https://images.unsplash.com/photo-1610475680335-dafab5475150?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
     icon: "Droplets",
   },

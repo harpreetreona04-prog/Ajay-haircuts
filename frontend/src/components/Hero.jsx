@@ -59,7 +59,7 @@ export const Hero = ({ onBook }) => {
         <div className="max-w-7xl mx-auto px-6 md:px-12 py-4 flex flex-wrap items-center justify-between gap-4 text-white/85 text-sm">
           <span className="flex items-center gap-2"><Phone size={15} className="text-[#C5A059]" /> {BUSINESS.phone}</span>
           <span className="hidden md:block h-4 w-px bg-white/20" />
-          <span>Mon–Fri 9AM–8PM · Sat 9AM–6PM · Sun 10AM–4PM</span>
+          <span>Open Daily 9AM – 9PM · Closed Tuesdays</span>
           <span className="hidden md:block h-4 w-px bg-white/20" />
           <span className="text-[#C5A059] font-semibold uppercase tracking-widest text-xs">Walk-ins Welcome</span>
         </div>

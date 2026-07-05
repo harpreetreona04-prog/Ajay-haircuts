@@ -142,10 +142,18 @@ async def list_bookings():
 @api_router.get("/bookings/availability")
 async def availability(date: str):
     slots = ["09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM",
-             "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM"]
+             "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM",
+             "07:00 PM", "08:00 PM"]
+    # Closed on Tuesdays
+    try:
+        is_tuesday = datetime.strptime(date, "%Y-%m-%d").weekday() == 1
+    except ValueError:
+        is_tuesday = False
+    if is_tuesday:
+        return {"date": date, "closed": True, "slots": [{"time": s, "available": False} for s in slots]}
     taken = await db.bookings.find({"date": date}, {"_id": 0, "time": 1}).to_list(1000)
     taken_times = {t['time'] for t in taken}
-    return {"date": date, "slots": [{"time": s, "available": s not in taken_times} for s in slots]}
+    return {"date": date, "closed": False, "slots": [{"time": s, "available": s not in taken_times} for s in slots]}
 
 
 @api_router.post("/contact")
