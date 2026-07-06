@@ -21,7 +21,7 @@ ecdsa==0.19.2
 email-validator==2.3.0
 
 execnet==2.1.2
-fastapi==0.110.1
+fastapi
 fastuuid==0.14.0
 filelock==3.29.4
 flake8==7.3.0
@@ -59,7 +59,7 @@ markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mccabe==0.7.0
 mdurl==0.1.2
-motor==3.3.1
+motor
 multidict==6.7.1
 mypy==2.1.0
 mypy_extensions==1.1.0
@@ -80,7 +80,7 @@ pyasn1==0.6.3
 pyasn1_modules==0.4.2
 pycodestyle==2.14.0
 pycparser==3.0
-pydantic==2.13.4
+pydantic[email]
 pydantic_core==2.46.4
 pyflakes==3.4.0
 Pygments==2.20.0
@@ -90,7 +90,7 @@ pyparsing==3.3.2
 pytest==9.1.1
 pytest-xdist==3.8.0
 python-dateutil==2.9.0.post0
-python-dotenv==1.2.2
+python-dotenv
 python-jose==3.5.0
 python-multipart==0.0.32
 pytokens==0.4.1
@@ -99,7 +99,7 @@ referencing==0.37.0
 regex==2026.6.28
 requests==2.34.2
 requests-oauthlib==2.0.0
-resend==2.32.2
+resend
 rich==15.0.0
 rpds-py==2026.6.3
 rsa==4.9.1
@@ -120,7 +120,7 @@ typing_extensions==4.16.0
 tzdata==2026.2
 uritemplate==4.2.0
 urllib3==2.7.0
-uvicorn==0.25.0
+uvicorn
 watchfiles==1.2.0
 websockets==16.0
 yarl==1.24.2
