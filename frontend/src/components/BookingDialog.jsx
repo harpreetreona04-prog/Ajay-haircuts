@@ -46,8 +46,14 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
       await axios.post(`${API}/bookings`, { service, date, time, ...info });
       setStep(3);
     } catch (e) {
-      const msg = e?.response?.data?.detail || "We couldn't complete your booking. Please try again or call us.";
-      setError(msg);
+     let msg = "We couldn't complete your booking. Please try again.";
+const detail = e?.response?.data?.detail;
+if (typeof detail === "string") {
+  msg = detail;
+} else if (Array.isArray(detail) && detail.length > 0) {
+  msg = detail.map(d => d.msg || "Invalid input").join(", ");
+}
+setError(msg); 
     } finally {
       setSubmitting(false);
     }
