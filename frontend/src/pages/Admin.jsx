@@ -64,16 +64,19 @@ export default function Admin() {
     if (unlocked) loadSlots(date);
   }, [unlocked, date]);
 
-  const blockSlot = async (time) => {
+ const blockSlot = async (time) => {
+    const customerName = window.prompt("Customer name for this booking:");
+    if (!customerName) return;
+    const customerPhone = window.prompt("Customer phone (optional):") || "N/A";
     setBlocking(time);
     try {
       await axios.post(`${API}/bookings`, {
-        service: "Blocked (phone/walk-in)",
+        service: "Phone/Walk-in booking",
         date,
         time,
-        name: "Blocked slot",
+        name: customerName,
         email: "owner@ajayhaircut.com",
-        phone: "0000000000",
+        phone: customerPhone,
       });
       loadSlots(date);
       loadBookings();
@@ -149,8 +152,8 @@ export default function Admin() {
         <div style={styles.sectionTitle}>Upcoming bookings</div>
         {loadingBookings ? (
           <div style={styles.hint}>Loading bookings...</div>
-        ) : bookings.length === 0 ? (
-          <div style={styles.hint}>No bookings yet.</div>
+        ) : bookings.filter((b) => b.date === date).length === 0 ? (
+          <div style={styles.hint}>No bookings for this date.</div>
         ) : (
           <table style={styles.table}>
             <thead>
@@ -163,7 +166,9 @@ export default function Admin() {
               </tr>
             </thead>
             <tbody>
-              {bookings.map((b, i) => (
+              {bookings
+                .filter((b) => b.date === date)
+                .map((b, i) => (
                 <tr key={i}>
                   <td style={styles.td}>{b.date}</td>
                   <td style={styles.td}>{b.time}</td>
