@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import resend
 
 ROOT_DIR = Path(__file__).parent
@@ -22,6 +23,9 @@ db = client[os.environ['DB_NAME']]
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 OWNER_EMAIL = os.environ.get('OWNER_EMAIL')
+# Supports one or more addresses in OWNER_EMAIL, comma-separated, e.g.
+# OWNER_EMAIL=ajay@example.com,harpreetreona04@gmail.com,other@example.com
+OWNER_EMAILS = [e.strip() for e in OWNER_EMAIL.split(',')] if OWNER_EMAIL else []
 if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
 
@@ -42,6 +46,18 @@ BUSINESS = {
     "phone": "(778) 344-2550",
     "location": "Surrey, BC, Canada",
 }
+
+# Surrey, BC is in the Pacific timezone. Used so "is this slot already in
+# the past?" is judged by the shop's local clock, not the server's.
+BUSINESS_TZ = ZoneInfo("America/Vancouver")
+
+
+def _now_local() -> datetime:
+    return datetime.now(BUSINESS_TZ)
+
+
+def _today_str() -> str:
+    return _now_local().strftime("%Y-%m-%d")
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -313,16 +329,16 @@ async def _send_email(to_email: str, subject: str, html: str):
 async def _send_confirmation(b: Booking):
     await _send_email(b.email, f"Your booking is confirmed — {b.date} at {b.time}", _confirmation_html(b))
 
-    if OWNER_EMAIL:
+    if OWNER_EMAILS:
         owner_params = {
             "from": f"Ajay Haircut Bookings <{SENDER_EMAIL}>",
-            "to": [OWNER_EMAIL],
+            "to": OWNER_EMAILS,
             "subject": f"New Booking: {b.service} — {b.date} {b.time}",
             "html": _owner_html(b),
         }
         try:
             await asyncio.to_thread(resend.Emails.send, owner_params)
-            logger.info(f"Owner notification sent to {OWNER_EMAIL}")
+            logger.info(f"Owner notification sent to {OWNER_EMAILS}")
         except Exception as e:
             logger.error(f"Failed to send owner notification: {e}")
 
@@ -350,6 +366,11 @@ async def create_booking(payload: BookingCreate):
         new_start = _parse_clock(payload.time)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format.")
+
+    if payload.date == _today_str():
+        now_clock = _parse_clock(_now_local().strftime("%I:%M %p"))
+        if new_start <= now_clock:
+            raise HTTPException(status_code=400, detail="That time has already passed today. Please choose a later time.")
 
     existing = await _booked_intervals(payload.date)
     if any(_ranges_overlap(new_start, duration, b_start, b_dur) for b_start, b_dur in existing):
@@ -382,10 +403,18 @@ async def availability(date: str, service: Optional[str] = None, ignore_closed: 
         return {"date": date, "closed": True, "slots": [{"time": s, "available": False} for s in candidate_times]}
 
     booked = await _booked_intervals(date, exclude_id=exclude_id)
+
+    # If the requested date is today, anything at or before the current
+    # time (shop's local clock) is no longer bookable.
+    is_today = date == _today_str()
+    now_clock = _parse_clock(_now_local().strftime("%I:%M %p")) if is_today else None
+
     slots = []
     for s in candidate_times:
         s_start = _parse_clock(s)
         available = not any(_ranges_overlap(s_start, duration, b_start, b_dur) for b_start, b_dur in booked)
+        if is_today and s_start <= now_clock:
+            available = False
         slots.append({"time": s, "available": available})
 
     return {"date": date, "closed": False, "slots": slots}
