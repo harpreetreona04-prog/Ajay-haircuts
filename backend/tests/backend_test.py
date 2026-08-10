@@ -33,16 +33,48 @@ class TestHealth:
 
 # Availability endpoint
 class TestAvailability:
-    def test_availability_returns_11_slots(self, session):
+    def test_availability_default_duration(self, session):
         d = future_date(3)
         r = session.get(f"{API}/bookings/availability", params={"date": d})
         assert r.status_code == 200
         data = r.json()
         assert data["date"] == d
         assert isinstance(data["slots"], list)
-        assert len(data["slots"]) == 12
+        assert len(data["slots"]) > 0
         for slot in data["slots"]:
             assert "time" in slot and "available" in slot
+
+    def test_longer_service_has_fewer_slots(self, session):
+        # A 45-min service (Haircut & Beard) must finish by closing time,
+        # so it has fewer possible start times than a 30-min service.
+        d = future_date(4)
+        short = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
+        longer = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Haircut & Beard"}).json()
+        assert len(longer["slots"]) < len(short["slots"])
+
+    def test_booking_blocks_overlapping_slots_not_just_exact_match(self, session):
+        # Book a 45-min "Haircut & Beard" at 10:00 AM -> occupies 10:00-10:45.
+        # A 30-min service slot at 10:15 or 10:30 should now be blocked even
+        # though neither matches the booked start time exactly.
+        d = future_date(20)
+        payload = {
+            "service": "Haircut & Beard",
+            "date": d,
+            "time": "10:00 AM",
+            "name": "TEST_Overlap Booking",
+            "email": "delivered@resend.dev",
+            "phone": "+17783442550",
+        }
+        r = session.post(f"{API}/bookings", json=payload)
+        assert r.status_code == 200, r.text
+
+        avail = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
+        by_time = {s["time"]: s["available"] for s in avail["slots"]}
+        assert by_time.get("10:00 AM") is False
+        assert by_time.get("10:15 AM") is False  # overlaps 10:00-10:45
+        assert by_time.get("10:30 AM") is False  # overlaps 10:00-10:45
+        assert by_time.get("09:30 AM") is True   # finishes by 10:00, no overlap
+        assert by_time.get("10:45 AM") is True   # starts right when the booking ends
 
 
 # Booking creation + persistence + availability update
@@ -98,6 +130,92 @@ class TestBookings:
         }
         r = session.post(f"{API}/bookings", json=payload)
         assert r.status_code == 422
+
+    def test_overlapping_booking_rejected_with_409(self, session):
+        d = future_date(21)
+        payload = {
+            "service": "Haircut & Beard",
+            "date": d,
+            "time": "02:00 PM",
+            "name": "TEST_Conflict A",
+            "email": "delivered@resend.dev",
+            "phone": "+17783442550",
+        }
+        r1 = session.post(f"{API}/bookings", json=payload)
+        assert r1.status_code == 200
+
+        conflicting = dict(payload, time="02:15 PM", name="TEST_Conflict B")
+        r2 = session.post(f"{API}/bookings", json=conflicting)
+        assert r2.status_code == 409
+
+
+# Admin endpoints — walk-in bookings, blocking, editing, cancel/unblock
+class TestAdminBookings:
+    def test_admin_create_walkin_booking(self, session):
+        d = future_date(22)
+        payload = {
+            "service": "Skin Fades",
+            "date": d,
+            "time": "11:00 AM",
+            "name": "TEST_Walkin Customer",
+            "phone": "+17783442550",
+        }
+        r = session.post(f"{API}/admin/bookings", json=payload)
+        assert r.status_code == 200, r.text
+        booking = r.json()
+        assert booking["status"] == "confirmed"
+        assert booking["duration_minutes"] == 30
+
+    def test_admin_block_time_with_custom_duration(self, session):
+        d = future_date(23)
+        payload = {
+            "date": d,
+            "time": "03:00 PM",
+            "duration_minutes": 60,
+            "name": "Lunch break",
+            "is_block": True,
+        }
+        r = session.post(f"{API}/admin/bookings", json=payload)
+        assert r.status_code == 200, r.text
+        booking = r.json()
+        assert booking["status"] == "blocked"
+        assert booking["duration_minutes"] == 60
+
+        # A 30-min slot inside the block (e.g. 3:15) should now be unavailable
+        avail = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
+        by_time = {s["time"]: s["available"] for s in avail["slots"]}
+        assert by_time.get("03:15 PM") is False
+
+    def test_admin_edit_booking_reschedules_it(self, session):
+        d = future_date(24)
+        create = session.post(f"{API}/admin/bookings", json={
+            "service": "Skin Fades",
+            "date": d,
+            "time": "09:00 AM",
+            "name": "TEST_Reschedule Me",
+        })
+        assert create.status_code == 200
+        booking_id = create.json()["id"]
+
+        edit = session.patch(f"{API}/admin/bookings/{booking_id}", json={"time": "10:00 AM"})
+        assert edit.status_code == 200, edit.text
+        assert edit.json()["time"] == "10:00 AM"
+
+    def test_admin_cancel_booking(self, session):
+        d = future_date(25)
+        create = session.post(f"{API}/admin/bookings", json={
+            "service": "Skin Fades",
+            "date": d,
+            "time": "01:00 PM",
+            "name": "TEST_Cancel Me",
+        })
+        booking_id = create.json()["id"]
+
+        delete = session.delete(f"{API}/admin/bookings/{booking_id}")
+        assert delete.status_code == 200
+
+        listing = session.get(f"{API}/bookings").json()
+        assert not any(b["id"] == booking_id for b in listing)
 
 
 # Contact endpoint
