@@ -1,225 +1,789 @@
-from fastapi import FastAPI, APIRouter, HTTPException
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-import asyncio
-from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
-from typing import List, Optional
-import uuid
-from datetime import datetime, timezone
-import resend
+import { useState, useEffect, useMemo } from "react";
+import axios from "axios";
+import {
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  addDays,
+  addMonths,
+  subMonths,
+  format,
+  isSameMonth,
+  isToday,
+} from "date-fns";
+import { SERVICES } from "../data/site";
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const ADMIN_PASSWORD = process.env.REACT_APP_ADMIN_PASSWORD;
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+// Sent as X-Admin-Key on owner-only endpoints. The backend only enforces
+// this if ADMIN_API_KEY is set in its own .env — see server.py. Setting
+// both env vars to the same value is what actually locks the API down;
+// the login screen alone only gates the dashboard UI, not the API itself.
+const adminHeaders = () =>
+  ADMIN_PASSWORD ? { "X-Admin-Key": ADMIN_PASSWORD } : {};
 
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
-OWNER_EMAIL = os.environ.get('OWNER_EMAIL')
-if RESEND_API_KEY:
-    resend.api_key = RESEND_API_KEY
+const todayStr = () => format(new Date(), "yyyy-MM-dd");
+const toDateStr = (d) => format(d, "yyyy-MM-dd");
 
-BUSINESS = {
-    "name": "Ajay Haircut",
-    "phone": "(778) 344-2550",
-    "location": "Surrey, BC, Canada",
+const WALKIN_SERVICE = "Phone / Walk-in";
+const SERVICE_OPTIONS = [WALKIN_SERVICE, ...SERVICES.map((s) => s.title)];
+
+const durationForService = (service) =>
+  SERVICES.find((s) => s.title === service)?.duration || 30;
+
+const emptyForm = (date, time) => ({
+  service: WALKIN_SERVICE,
+  date: date || todayStr(),
+  time: time || "",
+  name: "",
+  phone: "",
+  notes: "",
+  isBlock: false,
+  blockDuration: 30,
+});
+
+export default function Admin() {
+  const [unlocked, setUnlocked] = useState(
+    sessionStorage.getItem("admin_ok") === "1"
+  );
+  const [pwInput, setPwInput] = useState("");
+  const [pwError, setPwError] = useState("");
+
+  const [allBookings, setAllBookings] = useState([]);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+
+  const [month, setMonth] = useState(startOfMonth(new Date()));
+  const [selectedDate, setSelectedDate] = useState(todayStr());
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState("create"); // "create" | "edit"
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyForm());
+  const [slots, setSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [modalError, setModalError] = useState("");
+  const [rowBusyId, setRowBusyId] = useState("");
+
+  const checkPassword = (e) => {
+    e.preventDefault();
+    if (pwInput === ADMIN_PASSWORD && ADMIN_PASSWORD) {
+      sessionStorage.setItem("admin_ok", "1");
+      setUnlocked(true);
+      setPwError("");
+    } else {
+      setPwError("Wrong password. Try again.");
+    }
+  };
+
+  const loadAllBookings = () => {
+    setLoadingBookings(true);
+    axios
+      .get(`${API}/bookings`)
+      .then(({ data }) => setAllBookings(Array.isArray(data) ? data : []))
+      .catch(() => setAllBookings([]))
+      .finally(() => setLoadingBookings(false));
+  };
+
+  useEffect(() => {
+    if (unlocked) loadAllBookings();
+  }, [unlocked]);
+
+  const countsByDate = useMemo(() => {
+    const map = {};
+    allBookings.forEach((b) => {
+      map[b.date] = (map[b.date] || 0) + 1;
+    });
+    return map;
+  }, [allBookings]);
+
+  const dayBookings = useMemo(
+    () =>
+      allBookings
+        .filter((b) => b.date === selectedDate)
+        .sort((a, b) => a.time.localeCompare(b.time)),
+    [allBookings, selectedDate]
+  );
+
+  const calendarDays = useMemo(() => {
+    const start = startOfWeek(startOfMonth(month));
+    const end = endOfWeek(endOfMonth(month));
+    const days = [];
+    let cur = start;
+    while (cur <= end) {
+      days.push(cur);
+      cur = addDays(cur, 1);
+    }
+    return days;
+  }, [month]);
+
+  // ----- Modal: slot fetching -----
+  const fetchModalSlots = (opts) => {
+    const { date, service, excludeId } = opts;
+    if (!date) { setSlots([]); return; }
+    setSlotsLoading(true);
+    const params = { date, ignore_closed: true, service };
+    if (excludeId) params.exclude_id = excludeId;
+    axios
+      .get(`${API}/bookings/availability`, { params })
+      .then(({ data }) => setSlots(data.slots || []))
+      .catch(() => setSlots([]))
+      .finally(() => setSlotsLoading(false));
+  };
+
+  // Blocks don't map to a real service, so we fetch the slot grid using the
+  // walk-in default (30 min spacing) for display; the server-side overlap
+  // check on submit uses the actual block duration and is what really
+  // protects against double-booking.
+  useEffect(() => {
+    if (!modalOpen || !form.date) return;
+    fetchModalSlots({
+      date: form.date,
+      service: form.isBlock ? WALKIN_SERVICE : form.service,
+      excludeId: modalMode === "edit" ? editingId : null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, form.date, form.service, form.isBlock]);
+
+  const openCreateModal = (date, time) => {
+    setModalMode("create");
+    setEditingId(null);
+    setForm(emptyForm(date, time));
+    setModalError("");
+    setModalOpen(true);
+  };
+
+  const openEditModal = (booking) => {
+    setModalMode("edit");
+    setEditingId(booking.id);
+    setForm({
+      service: booking.service,
+      date: booking.date,
+      time: booking.time,
+      name: booking.name,
+      phone: booking.phone === "N/A" ? "" : booking.phone,
+      notes: booking.notes || "",
+      isBlock: booking.status === "blocked",
+      blockDuration: booking.duration_minutes || 30,
+    });
+    setModalError("");
+    setModalOpen(true);
+  };
+
+  const closeModal = () => setModalOpen(false);
+
+  const submitModal = async () => {
+    if (!form.time) { setModalError("Pick a time slot."); return; }
+    if (!form.name.trim()) { setModalError("Enter a customer name (or a reason if blocking)."); return; }
+
+    setSubmitting(true);
+    setModalError("");
+    try {
+      if (modalMode === "create") {
+        await axios.post(
+          `${API}/admin/bookings`,
+          {
+            service: form.isBlock ? "Blocked" : form.service,
+            date: form.date,
+            time: form.time,
+            duration_minutes: form.isBlock ? Number(form.blockDuration) : undefined,
+            name: form.name,
+            phone: form.phone || "N/A",
+            notes: form.notes,
+            is_block: form.isBlock,
+          },
+          { headers: adminHeaders() }
+        );
+      } else {
+        await axios.patch(
+          `${API}/admin/bookings/${editingId}`,
+          {
+            service: form.isBlock ? "Blocked" : form.service,
+            date: form.date,
+            time: form.time,
+            duration_minutes: form.isBlock ? Number(form.blockDuration) : undefined,
+            name: form.name,
+            phone: form.phone || "N/A",
+            notes: form.notes,
+            status: form.isBlock ? "blocked" : "confirmed",
+          },
+          { headers: adminHeaders() }
+        );
+      }
+      setModalOpen(false);
+      setSelectedDate(form.date);
+      loadAllBookings();
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      setModalError(typeof detail === "string" ? detail : "Couldn't save that booking. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cancelBooking = async (booking) => {
+    const label = booking.status === "blocked" ? "unblock this time" : "cancel this booking";
+    if (!window.confirm(`Are you sure you want to ${label}?`)) return;
+    setRowBusyId(booking.id);
+    try {
+      await axios.delete(`${API}/admin/bookings/${booking.id}`, { headers: adminHeaders() });
+      loadAllBookings();
+    } catch (e) {
+      alert("Couldn't complete that action. Please try again.");
+    } finally {
+      setRowBusyId("");
+    }
+  };
+
+  if (!unlocked) {
+    return (
+      <div style={styles.lockWrap}>
+        <form onSubmit={checkPassword} style={styles.lockBox}>
+          <div style={styles.eyebrow}>Owner access</div>
+          <h1 style={styles.h1}>Admin Login</h1>
+          <input
+            type="password"
+            placeholder="Enter password"
+            value={pwInput}
+            onChange={(e) => setPwInput(e.target.value)}
+            style={styles.input}
+            autoFocus
+          />
+          {pwError && <div style={styles.error}>{pwError}</div>}
+          <button type="submit" style={styles.btnPrimary}>
+            Unlock
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.wrap}>
+      <header style={styles.header}>
+        <div style={styles.eyebrow}>Owner access</div>
+        <h1 style={styles.h1}>Booking Dashboard</h1>
+        <div style={styles.sub}>Ajay Haircut · Surrey, BC</div>
+      </header>
+
+      <div style={styles.panel}>
+        <div style={styles.calendarHeader}>
+          <button style={styles.navBtn} onClick={() => setMonth((m) => subMonths(m, 1))}>‹</button>
+          <div style={styles.monthLabel}>{format(month, "MMMM yyyy")}</div>
+          <button style={styles.navBtn} onClick={() => setMonth((m) => addMonths(m, 1))}>›</button>
+        </div>
+
+        <div style={styles.weekRow}>
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+            <div key={i} style={styles.weekDay}>{d}</div>
+          ))}
+        </div>
+
+        <div style={styles.calendarGrid}>
+          {calendarDays.map((d) => {
+            const ds = toDateStr(d);
+            const inMonth = isSameMonth(d, month);
+            const count = countsByDate[ds] || 0;
+            const isSelected = ds === selectedDate;
+            const isTuesday = d.getDay() === 2;
+            return (
+              <button
+                key={ds}
+                onClick={() => setSelectedDate(ds)}
+                style={{
+                  ...styles.dayCell,
+                  opacity: inMonth ? 1 : 0.35,
+                  ...(isSelected ? styles.dayCellSelected : {}),
+                  ...(isToday(d) && !isSelected ? styles.dayCellToday : {}),
+                }}
+              >
+                <span style={{ ...styles.dayNum, color: isSelected ? "#fff" : "#1C2340" }}>{format(d, "d")}</span>
+                {isTuesday && <span style={styles.dayClosedTag}>closed</span>}
+                {count > 0 && (
+                  <span style={isSelected ? styles.dayCountSelected : styles.dayCount}>{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={styles.dayPanelHeader}>
+          <div>
+            <div style={styles.sectionTitle}>{format(new Date(selectedDate + "T00:00:00"), "EEEE, MMM d")}</div>
+            <div style={styles.hint}>
+              {loadingBookings ? "Loading..." : `${dayBookings.length} booking${dayBookings.length === 1 ? "" : "s"}`}
+            </div>
+          </div>
+          <button style={styles.btnAdd} onClick={() => openCreateModal(selectedDate, "")}>
+            + Add booking
+          </button>
+        </div>
+
+        {dayBookings.length === 0 ? (
+          <div style={styles.hint}>No bookings for this date.</div>
+        ) : (
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Time</th>
+                <th style={styles.th}>Customer</th>
+                <th style={styles.th}>Service</th>
+                <th style={styles.th}>Phone</th>
+                <th style={styles.th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {dayBookings.map((b) => (
+                <tr key={b.id}>
+                  <td style={styles.td}>
+                    {b.time}
+                    <div style={styles.durationTag}>{b.duration_minutes || 30} min</div>
+                  </td>
+                  <td style={styles.td}>
+                    {b.name}
+                    {b.status === "blocked" && <div style={styles.blockedTag}>blocked</div>}
+                  </td>
+                  <td style={styles.td}>{b.service}</td>
+                  <td style={styles.td}>{b.phone}</td>
+                  <td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button style={styles.btnLinkSmall} onClick={() => openEditModal(b)}>Edit</button>
+                    <button
+                      style={styles.btnLinkDanger}
+                      disabled={rowBusyId === b.id}
+                      onClick={() => cancelBooking(b)}
+                    >
+                      {rowBusyId === b.id ? "..." : b.status === "blocked" ? "Unblock" : "Cancel"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {modalOpen && (
+        <div style={styles.modalOverlay} onClick={closeModal}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              {modalMode === "create" ? "Add booking" : "Edit booking"}
+            </div>
+
+            <label style={styles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={form.isBlock}
+                onChange={(e) => setForm((f) => ({ ...f, isBlock: e.target.checked, time: "" }))}
+              />
+              Block this time (no customer)
+            </label>
+
+            {!form.isBlock && (
+              <>
+                <div style={styles.fieldLabel}>Service</div>
+                <select
+                  style={styles.select}
+                  value={form.service}
+                  onChange={(e) => setForm((f) => ({ ...f, service: e.target.value, time: "" }))}
+                >
+                  {SERVICE_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s} · {durationForService(s) || 30} min
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            {form.isBlock && (
+              <>
+                <div style={styles.fieldLabel}>Duration (minutes)</div>
+                <input
+                  type="number"
+                  min={5}
+                  step={5}
+                  style={styles.input2}
+                  value={form.blockDuration}
+                  onChange={(e) => setForm((f) => ({ ...f, blockDuration: e.target.value, time: "" }))}
+                />
+              </>
+            )}
+
+            <div style={styles.fieldLabel}>Date</div>
+            <input
+              type="date"
+              style={styles.input2}
+              value={form.date}
+              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value, time: "" }))}
+            />
+
+            <div style={styles.fieldLabel}>Time</div>
+            {slotsLoading ? (
+              <div style={styles.hint}>Loading slots...</div>
+            ) : (
+              <div style={styles.slotsGrid}>
+                {slots.map((s) => {
+                  const isThisSlot = s.time === form.time;
+                  const usable = s.available || isThisSlot;
+                  return (
+                    <button
+                      key={s.time}
+                      disabled={!usable}
+                      onClick={() => setForm((f) => ({ ...f, time: s.time }))}
+                      style={isThisSlot ? styles.slotSelected : usable ? styles.slotOpen : styles.slotTaken}
+                    >
+                      {s.time}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={styles.fieldLabel}>{form.isBlock ? "Reason" : "Customer name"}</div>
+            <input
+              type="text"
+              style={styles.input2}
+              placeholder={form.isBlock ? "e.g. Lunch break" : "Customer name"}
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            />
+
+            {!form.isBlock && (
+              <>
+                <div style={styles.fieldLabel}>Phone (optional)</div>
+                <input
+                  type="text"
+                  style={styles.input2}
+                  placeholder="Phone number"
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                />
+              </>
+            )}
+
+            <div style={styles.fieldLabel}>Notes (optional)</div>
+            <textarea
+              rows={2}
+              style={{ ...styles.input2, resize: "none" }}
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            />
+
+            {modalError && <div style={styles.error}>{modalError}</div>}
+
+            <div style={styles.modalActions}>
+              <button style={styles.btnSecondary} onClick={closeModal}>Cancel</button>
+              <button style={styles.btnPrimary} onClick={submitModal} disabled={submitting}>
+                {submitting ? "Saving..." : modalMode === "create" ? "Add booking" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
-app = FastAPI()
-api_router = APIRouter(prefix="/api")
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-
-class BookingCreate(BaseModel):
-    service: str
-    date: str
-    time: str
-    name: str
-    email: EmailStr
-    phone: str
-    notes: Optional[str] = ""
-
-
-class Booking(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    service: str
-    date: str
-    time: str
-    name: str
-    email: EmailStr
-    phone: str
-    notes: Optional[str] = ""
-    status: str = "confirmed"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class ContactCreate(BaseModel):
-    name: str
-    email: EmailStr
-    phone: Optional[str] = ""
-    message: str
-
-
-SLOTS = ["09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM",
-         "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM",
-         "07:00 PM", "08:00 PM"]
-
-
-def _is_tuesday(date: str) -> bool:
-    try:
-        return datetime.strptime(date, "%Y-%m-%d").weekday() == 1
-    except ValueError:
-        return False
-
-
-def _confirmation_html(b: Booking) -> str:
-    return f"""
-    <div style="font-family: Arial, Helvetica, sans-serif; background:#FAFAFA; padding:32px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;">
-        <tr><td style="background:#111827;padding:28px 32px;">
-          <span style="color:#C5A059;font-size:22px;font-weight:700;letter-spacing:1px;">AJAY HAIRCUT</span>
-          <div style="color:#9CA3AF;font-size:12px;letter-spacing:3px;margin-top:4px;">SURREY, BC</div>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h1 style="color:#111827;font-size:24px;margin:0 0 8px;">Booking Confirmed</h1>
-          <p style="color:#4B5563;font-size:15px;margin:0 0 24px;">Hi {b.name}, your appointment is booked. We look forward to seeing you.</p>
-          <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E5E7EB;">
-            <tr><td style="padding:14px 0;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Service</td><td style="padding:14px 0;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.service}</td></tr>
-            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Date</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.date}</td></tr>
-            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Time</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.time}</td></tr>
-          </table>
-          <div style="margin-top:28px;padding:20px;background:#FAFAFA;border:1px solid #E5E7EB;">
-            <p style="margin:0;color:#111827;font-size:14px;"><strong>{BUSINESS['name']}</strong></p>
-            <p style="margin:6px 0 0;color:#4B5563;font-size:14px;">{BUSINESS['location']}</p>
-            <p style="margin:6px 0 0;color:#C5A059;font-size:14px;font-weight:600;">{BUSINESS['phone']}</p>
-          </div>
-          <p style="color:#9CA3AF;font-size:12px;margin-top:24px;">Need to reschedule? Call us at {BUSINESS['phone']}.</p>
-        </td></tr>
-      </table>
-    </div>
-    """
-
-
-def _owner_html(b: Booking) -> str:
-    notes_block = f'<div style="margin-top:20px;padding:16px;background:#FAFAFA;border:1px solid #E5E7EB;color:#4B5563;font-size:14px;"><strong>Notes:</strong> {b.notes}</div>' if b.notes else ''
-    return f"""
-    <div style="font-family: Arial, Helvetica, sans-serif; background:#FAFAFA; padding:32px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;">
-        <tr><td style="background:#111827;padding:24px 32px;">
-          <span style="color:#C5A059;font-size:13px;letter-spacing:2px;text-transform:uppercase;font-weight:700;">New Appointment</span>
-          <h1 style="color:#ffffff;font-size:22px;margin:6px 0 0;">You have a new booking</h1>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr><td style="padding:12px 0;color:#6B7280;font-size:13px;">Service</td><td style="padding:12px 0;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.service}</td></tr>
-            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Date</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.date}</td></tr>
-            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Time</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.time}</td></tr>
-            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Customer</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.name}</td></tr>
-            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Phone</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;"><a href="tel:{b.phone}" style="color:#C5A059;text-decoration:none;">{b.phone}</a></td></tr>
-            <tr><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;">Email</td><td style="padding:12px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.email}</td></tr>
-          </table>
-          {notes_block}
-        </td></tr>
-      </table>
-    </div>
-    """
-
-
-async def _send_confirmation(b: Booking):
-    if not RESEND_API_KEY:
-        logger.warning("RESEND_API_KEY not set; skipping email")
-        return
-    params = {
-        "from": f"Ajay Haircut <{SENDER_EMAIL}>",
-        "to": [b.email],
-        "subject": f"Your booking is confirmed — {b.date} at {b.time}",
-        "html": _confirmation_html(b),
-    }
-    try:
-        await asyncio.to_thread(resend.Emails.send, params)
-        logger.info(f"Confirmation email sent to {b.email}")
-    except Exception as e:
-        logger.error(f"Failed to send confirmation email: {e}")
-
-    if OWNER_EMAIL:
-        owner_params = {
-            "from": f"Ajay Haircut Bookings <{SENDER_EMAIL}>",
-            "to": [OWNER_EMAIL],
-            "subject": f"New Booking: {b.service} — {b.date} {b.time}",
-            "html": _owner_html(b),
-        }
-        try:
-            await asyncio.to_thread(resend.Emails.send, owner_params)
-            logger.info(f"Owner notification sent to {OWNER_EMAIL}")
-        except Exception as e:
-            logger.error(f"Failed to send owner notification: {e}")
-
-
-@api_router.get("/")
-async def root():
-    return {"message": "Ajay Haircut API"}
-
-
-@api_router.post("/bookings", response_model=Booking)
-async def create_booking(payload: BookingCreate):
-    if _is_tuesday(payload.date):
-        raise HTTPException(status_code=400, detail="We are closed on Tuesdays. Please choose another day.")
-    booking = Booking(**payload.model_dump())
-    doc = booking.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    await db.bookings.insert_one(doc)
-    asyncio.create_task(_send_confirmation(booking))
-    return booking
-
-
-@api_router.get("/bookings", response_model=List[Booking])
-async def list_bookings():
-    docs = await db.bookings.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    for d in docs:
-        if isinstance(d.get('created_at'), str):
-            d['created_at'] = datetime.fromisoformat(d['created_at'])
-    return docs
-
-
-@api_router.get("/bookings/availability")
-async def availability(date: str):
-    if _is_tuesday(date):
-        return {"date": date, "closed": True, "slots": [{"time": s, "available": False} for s in SLOTS]}
-    taken = await db.bookings.find({"date": date}, {"_id": 0, "time": 1}).to_list(1000)
-    taken_times = {t['time'] for t in taken}
-    return {"date": date, "closed": False, "slots": [{"time": s, "available": s not in taken_times} for s in SLOTS]}
-
-
-@api_router.post("/contact")
-async def contact(payload: ContactCreate):
-    doc = payload.model_dump()
-    doc['id'] = str(uuid.uuid4())
-    doc['created_at'] = datetime.now(timezone.utc).isoformat()
-    await db.contacts.insert_one(doc)
-    return {"status": "ok", "message": "Thanks for reaching out. We'll be in touch soon."}
-
-
-app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+const styles = {
+  lockWrap: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#F5F3EF",
+    fontFamily: "Inter, sans-serif",
+  },
+  lockBox: {
+    background: "#fff",
+    padding: "32px 28px",
+    borderRadius: 12,
+    boxShadow: "0 2px 12px rgba(28,35,64,0.08)",
+    width: 300,
+  },
+  wrap: {
+    maxWidth: 900,
+    margin: "0 auto",
+    padding: "32px 16px",
+    fontFamily: "Inter, sans-serif",
+    color: "#1C2340",
+  },
+  header: {
+    background: "#1C2340",
+    color: "#fff",
+    padding: "24px 28px",
+    borderRadius: "10px 10px 0 0",
+  },
+  eyebrow: {
+    color: "#D4A24C",
+    fontSize: 12,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+    fontWeight: 600,
+  },
+  h1: { fontSize: 24, marginTop: 4, fontWeight: 700 },
+  sub: { color: "#B9BDD3", fontSize: 13, marginTop: 6 },
+  panel: {
+    background: "#fff",
+    borderRadius: "0 0 10px 10px",
+    padding: "24px 28px 28px",
+    boxShadow: "0 2px 12px rgba(28,35,64,0.06)",
+  },
+  calendarHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  navBtn: {
+    border: "1px solid #E7E3DA",
+    background: "#fff",
+    borderRadius: 8,
+    width: 32,
+    height: 32,
+    fontSize: 16,
+    cursor: "pointer",
+  },
+  monthLabel: { fontSize: 16, fontWeight: 700 },
+  weekRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    marginBottom: 4,
+  },
+  weekDay: {
+    textAlign: "center",
+    fontSize: 11,
+    color: "#8A8F9E",
+    fontWeight: 600,
+    padding: "4px 0",
+  },
+  calendarGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    gap: 4,
+  },
+  dayCell: {
+    position: "relative",
+    border: "1px solid #F0EEE8",
+    background: "#fff",
+    borderRadius: 8,
+    height: 52,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 4,
+  },
+  dayCellSelected: {
+    border: "1px solid #1C2340",
+    background: "#1C2340",
+  },
+  dayCellToday: {
+    border: "1px solid #D4A24C",
+  },
+  dayNum: { fontSize: 13, fontWeight: 600 },
+  dayClosedTag: { fontSize: 9, color: "#B23A3A", marginTop: 1 },
+  dayCount: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    fontSize: 9,
+    background: "#D4A24C",
+    color: "#1C2340",
+    borderRadius: 8,
+    padding: "1px 5px",
+    fontWeight: 700,
+  },
+  dayCountSelected: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    fontSize: 9,
+    background: "#D4A24C",
+    color: "#1C2340",
+    borderRadius: 8,
+    padding: "1px 5px",
+    fontWeight: 700,
+  },
+  dayPanelHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    margin: "24px 0 12px",
+  },
+  sectionTitle: { fontSize: 18, fontWeight: 700 },
+  hint: { fontSize: 12, color: "#8A8F9E", marginTop: 6 },
+  btnAdd: {
+    padding: "8px 14px",
+    background: "#1C2340",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 14, marginTop: 8 },
+  th: {
+    textAlign: "left",
+    fontSize: 11,
+    textTransform: "uppercase",
+    color: "#8A8F9E",
+    padding: "8px 10px",
+    borderBottom: "1px solid #E7E3DA",
+  },
+  td: { padding: "10px", borderBottom: "1px solid #F0EEE8", verticalAlign: "top" },
+  durationTag: { fontSize: 11, color: "#8A8F9E", marginTop: 2 },
+  blockedTag: {
+    fontSize: 11,
+    color: "#B23A3A",
+    marginTop: 2,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  btnLinkSmall: {
+    border: "none",
+    background: "none",
+    color: "#1C2340",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+    marginRight: 12,
+  },
+  btnLinkDanger: {
+    border: "none",
+    background: "none",
+    color: "#B23A3A",
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  input: {
+    width: "100%",
+    padding: "10px 12px",
+    border: "1px solid #E7E3DA",
+    borderRadius: 8,
+    fontSize: 14,
+    margin: "16px 0 8px",
+  },
+  input2: {
+    width: "100%",
+    padding: "9px 11px",
+    border: "1px solid #E7E3DA",
+    borderRadius: 8,
+    fontSize: 14,
+    marginBottom: 12,
+    boxSizing: "border-box",
+  },
+  select: {
+    width: "100%",
+    padding: "9px 11px",
+    border: "1px solid #E7E3DA",
+    borderRadius: 8,
+    fontSize: 14,
+    marginBottom: 12,
+    background: "#fff",
+  },
+  fieldLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    color: "#8A8F9E",
+    fontWeight: 600,
+    marginBottom: 4,
+  },
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    marginBottom: 16,
+    cursor: "pointer",
+  },
+  slotsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, 1fr)",
+    gap: 6,
+    marginBottom: 12,
+    maxHeight: 180,
+    overflowY: "auto",
+  },
+  slotOpen: {
+    border: "1px solid #E7E3DA",
+    borderRadius: 6,
+    padding: "8px 4px",
+    fontSize: 12,
+    fontWeight: 500,
+    background: "#fff",
+    cursor: "pointer",
+  },
+  slotTaken: {
+    border: "1px solid #F0EEE8",
+    borderRadius: 6,
+    padding: "8px 4px",
+    fontSize: 12,
+    fontWeight: 500,
+    background: "#F5F3EF",
+    color: "#B9BDD3",
+    textDecoration: "line-through",
+    cursor: "not-allowed",
+  },
+  slotSelected: {
+    border: "1px solid #1C2340",
+    borderRadius: 6,
+    padding: "8px 4px",
+    fontSize: 12,
+    fontWeight: 600,
+    background: "#1C2340",
+    color: "#fff",
+    cursor: "pointer",
+  },
+  error: { color: "#B23A3A", fontSize: 12, marginBottom: 8 },
+  btnPrimary: {
+    padding: "10px 18px",
+    background: "#1C2340",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  btnSecondary: {
+    padding: "10px 18px",
+    background: "#fff",
+    color: "#1C2340",
+    border: "1px solid #E7E3DA",
+    borderRadius: 8,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(28,35,64,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    zIndex: 50,
+  },
+  modalCard: {
+    background: "#fff",
+    borderRadius: 12,
+    padding: 24,
+    width: 380,
+    maxHeight: "90vh",
+    overflowY: "auto",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+  },
+  modalHeader: { fontSize: 17, fontWeight: 700, marginBottom: 16 },
+  modalActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 8,
+  },
+};
