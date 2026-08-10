@@ -28,14 +28,22 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
     }
   }, [open, defaultService]);
 
-  useEffect(() => {
-    if (!date) { setSlots([]); return; }
-    setSlotsLoading(true); setTime("");
-    axios.get(`${API}/bookings/availability`, { params: { date } })
+  const fetchAvailability = () => {
+    if (!date || !service) { setSlots([]); return; }
+    setSlotsLoading(true);
+    axios.get(`${API}/bookings/availability`, { params: { date, service } })
       .then(({ data }) => { setSlots(data.slots); setClosed(!!data.closed); })
       .catch(() => { setSlots([]); setClosed(false); })
       .finally(() => setSlotsLoading(false));
-  }, [date]);
+  };
+
+  useEffect(() => {
+    setTime("");
+    fetchAvailability();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date, service]);
+
+  const selectedDuration = SERVICES.find((s) => s.title === service)?.duration;
 
   const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
   const back = () => setStep((s) => Math.max(s - 1, 0));
@@ -46,14 +54,19 @@ export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
       await axios.post(`${API}/bookings`, { service, date, time, ...info });
       setStep(3);
     } catch (e) {
-     let msg = "We couldn't complete your booking. Please try again.";
-const detail = e?.response?.data?.detail;
-if (typeof detail === "string") {
-  msg = detail;
-} else if (Array.isArray(detail) && detail.length > 0) {
-  msg = detail.map(d => d.msg || "Invalid input").join(", ");
-}
-setError(msg); 
+      let msg = "We couldn't complete your booking. Please try again.";
+      const detail = e?.response?.data?.detail;
+      if (typeof detail === "string") {
+        msg = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        msg = detail.map(d => d.msg || "Invalid input").join(", ");
+      }
+      setError(msg);
+      if (e?.response?.status === 409) {
+        setTime("");
+        setStep(1);
+        fetchAvailability();
+      }
     } finally {
       setSubmitting(false);
     }
@@ -117,6 +130,7 @@ setError(msg);
 
               <label className="flex items-center gap-2 text-xs uppercase tracking-widest text-gray-400 font-semibold mt-6 mb-2">
                 <Clock size={14} /> Select time
+                {selectedDuration && <span className="text-gray-400 font-normal">· {selectedDuration} min</span>}
               </label>
               {!date && <p className="text-sm text-gray-400">Pick a date to see available times.</p>}
               {slotsLoading && <p className="text-sm text-gray-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading slots…</p>}
@@ -126,7 +140,7 @@ setError(msg);
               {date && !slotsLoading && !closed && (
                 <div className="grid grid-cols-3 gap-2">
                   {slots.map((s) => (
-                    <button key={s.time} disabled={!s.available} onClick={() => setTime(s.time)} data-testid={`slot-${s.time}`}
+                    <button key={s.time} disabled={!s.available} onClick={() => { setTime(s.time); setError(""); }} data-testid={`slot-${s.time}`}
                       className={`py-2 text-sm border transition-colors ${
                         time === s.time ? "border-[#C5A059] bg-[#C5A059] text-white"
                         : s.available ? "border-gray-200 text-[#111827] hover:border-[#C5A059]"
@@ -137,6 +151,7 @@ setError(msg);
                   ))}
                 </div>
               )}
+              {error && <p className="text-red-600 text-sm mt-3" data-testid="booking-error-step1">{error}</p>}
             </div>
           )}
 
