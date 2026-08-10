@@ -1,11 +1,13 @@
 """Backend tests for Ajay Haircut barber shop."""
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://fade-master-49.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
+BUSINESS_TZ = ZoneInfo("America/Vancouver")
 
 
 def future_date(days=5):
@@ -51,6 +53,37 @@ class TestAvailability:
         short = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
         longer = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Haircut & Beard"}).json()
         assert len(longer["slots"]) < len(short["slots"])
+
+    def test_todays_past_slots_are_unavailable(self, session):
+        today = datetime.now(BUSINESS_TZ).strftime("%Y-%m-%d")
+        if datetime.now(BUSINESS_TZ).weekday() == 1:
+            pytest.skip("Shop is closed today (Tuesday); nothing meaningful to assert.")
+        avail = session.get(f"{API}/bookings/availability", params={"date": today, "service": "Skin Fades"}).json()
+        if avail.get("closed"):
+            pytest.skip("Shop reported closed for today.")
+        now_clock = datetime.now(BUSINESS_TZ)
+        for slot in avail["slots"]:
+            slot_dt = datetime.strptime(slot["time"], "%I:%M %p").replace(
+                year=now_clock.year, month=now_clock.month, day=now_clock.day, tzinfo=BUSINESS_TZ
+            )
+            if slot_dt <= now_clock:
+                assert slot["available"] is False, f"{slot['time']} is in the past but marked available"
+
+    def test_cannot_book_a_past_time_today(self, session):
+        now = datetime.now(BUSINESS_TZ)
+        if now.weekday() == 1:
+            pytest.skip("Shop is closed today (Tuesday).")
+        past_time = (now - timedelta(hours=2)).strftime("%I:%M %p")
+        payload = {
+            "service": "Skin Fades",
+            "date": now.strftime("%Y-%m-%d"),
+            "time": past_time,
+            "name": "TEST_PastTime",
+            "email": "delivered@resend.dev",
+            "phone": "+17783442550",
+        }
+        r = session.post(f"{API}/bookings", json=payload)
+        assert r.status_code == 400
 
     def test_booking_blocks_overlapping_slots_not_just_exact_match(self, session):
         # Book a 45-min "Haircut & Beard" at 10:00 AM -> occupies 10:00-10:45.
