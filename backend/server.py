@@ -166,10 +166,11 @@ def _ranges_overlap(start_a: datetime, duration_a: int, start_b: datetime, durat
 
 
 async def _booked_intervals(date: str, exclude_id: Optional[str] = None):
-    """Return [(start_datetime, duration_minutes), ...] for every existing
-    booking on this date, optionally excluding one booking by id (used when
-    editing that booking so it doesn't block its own current slot)."""
-    query = {"date": date}
+    """Return [(start_datetime, duration_minutes), ...] for every ACTIVE
+    booking on this date (cancelled bookings don't occupy the slot anymore),
+    optionally excluding one booking by id (used when editing that booking
+    so it doesn't block its own current slot)."""
+    query = {"date": date, "status": {"$ne": "cancelled"}}
     if exclude_id:
         query["id"] = {"$ne": exclude_id}
     docs = await db.bookings.find(
@@ -236,21 +237,81 @@ def _owner_html(b: Booking) -> str:
     """
 
 
-async def _send_confirmation(b: Booking):
+def _rescheduled_html(b: Booking) -> str:
+    return f"""
+    <div style="font-family: Arial, Helvetica, sans-serif; background:#FAFAFA; padding:32px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;">
+        <tr><td style="background:#111827;padding:28px 32px;">
+          <span style="color:#C5A059;font-size:22px;font-weight:700;letter-spacing:1px;">AJAY HAIRCUT</span>
+          <div style="color:#9CA3AF;font-size:12px;letter-spacing:3px;margin-top:4px;">SURREY, BC</div>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="color:#111827;font-size:24px;margin:0 0 8px;">Booking Updated</h1>
+          <p style="color:#4B5563;font-size:15px;margin:0 0 24px;">Hi {b.name}, your appointment details have changed. Here's your updated booking:</p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E5E7EB;">
+            <tr><td style="padding:14px 0;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Service</td><td style="padding:14px 0;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.service}</td></tr>
+            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Date</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.date}</td></tr>
+            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Time</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.time}</td></tr>
+          </table>
+          <div style="margin-top:28px;padding:20px;background:#FAFAFA;border:1px solid #E5E7EB;">
+            <p style="margin:0;color:#111827;font-size:14px;"><strong>{BUSINESS['name']}</strong></p>
+            <p style="margin:6px 0 0;color:#4B5563;font-size:14px;">{BUSINESS['location']}</p>
+            <p style="margin:6px 0 0;color:#C5A059;font-size:14px;font-weight:600;">{BUSINESS['phone']}</p>
+          </div>
+          <p style="color:#9CA3AF;font-size:12px;margin-top:24px;">Questions? Call us at {BUSINESS['phone']}.</p>
+        </td></tr>
+      </table>
+    </div>
+    """
+
+
+def _cancellation_html(b: Booking) -> str:
+    return f"""
+    <div style="font-family: Arial, Helvetica, sans-serif; background:#FAFAFA; padding:32px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;">
+        <tr><td style="background:#111827;padding:28px 32px;">
+          <span style="color:#C5A059;font-size:22px;font-weight:700;letter-spacing:1px;">AJAY HAIRCUT</span>
+          <div style="color:#9CA3AF;font-size:12px;letter-spacing:3px;margin-top:4px;">SURREY, BC</div>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="color:#111827;font-size:24px;margin:0 0 8px;">Booking Cancelled</h1>
+          <p style="color:#4B5563;font-size:15px;margin:0 0 24px;">Hi {b.name}, your appointment below has been cancelled.</p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E5E7EB;">
+            <tr><td style="padding:14px 0;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Service</td><td style="padding:14px 0;color:#111827;font-size:15px;font-weight:600;text-align:right;text-decoration:line-through;">{b.service}</td></tr>
+            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Date</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;text-decoration:line-through;">{b.date}</td></tr>
+            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Time</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;text-decoration:line-through;">{b.time}</td></tr>
+          </table>
+          <p style="color:#4B5563;font-size:14px;margin-top:24px;">Want to book another time? We'd love to see you.</p>
+          <div style="margin-top:20px;padding:20px;background:#FAFAFA;border:1px solid #E5E7EB;">
+            <p style="margin:0;color:#111827;font-size:14px;"><strong>{BUSINESS['name']}</strong></p>
+            <p style="margin:6px 0 0;color:#4B5563;font-size:14px;">{BUSINESS['location']}</p>
+            <p style="margin:6px 0 0;color:#C5A059;font-size:14px;font-weight:600;">{BUSINESS['phone']}</p>
+          </div>
+        </td></tr>
+      </table>
+    </div>
+    """
+
+
+async def _send_email(to_email: str, subject: str, html: str):
     if not RESEND_API_KEY:
         logger.warning("RESEND_API_KEY not set; skipping email")
         return
     params = {
         "from": f"Ajay Haircut <{SENDER_EMAIL}>",
-        "to": [b.email],
-        "subject": f"Your booking is confirmed — {b.date} at {b.time}",
-        "html": _confirmation_html(b),
+        "to": [to_email],
+        "subject": subject,
+        "html": html,
     }
     try:
         await asyncio.to_thread(resend.Emails.send, params)
-        logger.info(f"Confirmation email sent to {b.email}")
+        logger.info(f"Email sent to {to_email}: {subject}")
     except Exception as e:
-        logger.error(f"Failed to send confirmation email: {e}")
+        logger.error(f"Failed to send email to {to_email}: {e}")
+
+
+async def _send_confirmation(b: Booking):
+    await _send_email(b.email, f"Your booking is confirmed — {b.date} at {b.time}", _confirmation_html(b))
 
     if OWNER_EMAIL:
         owner_params = {
@@ -264,6 +325,14 @@ async def _send_confirmation(b: Booking):
             logger.info(f"Owner notification sent to {OWNER_EMAIL}")
         except Exception as e:
             logger.error(f"Failed to send owner notification: {e}")
+
+
+async def _send_reschedule_notification(b: Booking):
+    await _send_email(b.email, f"Your booking has been updated — {b.date} at {b.time}", _rescheduled_html(b))
+
+
+async def _send_cancellation_notification(b: Booking):
+    await _send_email(b.email, f"Your booking on {b.date} has been cancelled", _cancellation_html(b))
 
 
 @api_router.get("/")
@@ -361,7 +430,8 @@ async def admin_create_booking(payload: AdminBookingCreate, x_admin_key: Optiona
 @api_router.patch("/admin/bookings/{booking_id}", response_model=Booking)
 async def admin_update_booking(booking_id: str, payload: AdminBookingUpdate, x_admin_key: Optional[str] = Header(None)):
     """Owner-only: edit, reschedule, cancel-and-rebook, or convert a booking
-    to/from a block."""
+    to/from a block. Notifies the customer by email when a real (non-block)
+    booking changes."""
     _require_admin(x_admin_key)
 
     existing_doc = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
@@ -384,7 +454,7 @@ async def admin_update_booking(booking_id: str, payload: AdminBookingUpdate, x_a
         raise HTTPException(status_code=400, detail="Invalid time format.")
 
     others_docs = await db.bookings.find(
-        {"date": merged['date'], "id": {"$ne": booking_id}},
+        {"date": merged['date'], "id": {"$ne": booking_id}, "status": {"$ne": "cancelled"}},
         {"_id": 0, "time": 1, "service": 1, "duration_minutes": 1},
     ).to_list(1000)
     other_intervals = [
@@ -400,18 +470,48 @@ async def admin_update_booking(booking_id: str, payload: AdminBookingUpdate, x_a
 
     if isinstance(merged.get('created_at'), str):
         merged['created_at'] = datetime.fromisoformat(merged['created_at'])
-    return Booking(**merged)
+    updated = Booking(**merged)
+
+    # Only real customer bookings have a genuine email to notify — blocks
+    # are stored with a placeholder address and shouldn't trigger email.
+    if updated.status != "blocked" and updated.email and updated.email != "owner@ajayhaircut.com":
+        asyncio.create_task(_send_reschedule_notification(updated))
+
+    return updated
 
 
 @api_router.delete("/admin/bookings/{booking_id}")
 async def admin_delete_booking(booking_id: str, x_admin_key: Optional[str] = Header(None)):
     """Owner-only: cancel a customer booking, or unblock a previously
-    blocked time slot — both are just row deletions."""
+    blocked time slot.
+
+    A blocked slot (no customer attached) is removed entirely — there's
+    nothing to keep a record of. A real customer booking is instead marked
+    'cancelled' and kept in the database so it still shows up in the admin
+    dashboard's history and frees up its time slot for new bookings; the
+    customer is emailed that it was cancelled.
+    """
     _require_admin(x_admin_key)
-    result = await db.bookings.delete_one({"id": booking_id})
-    if result.deleted_count == 0:
+
+    existing_doc = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not existing_doc:
         raise HTTPException(status_code=404, detail="Booking not found.")
-    return {"status": "ok"}
+
+    if existing_doc.get('status') == 'blocked':
+        await db.bookings.delete_one({"id": booking_id})
+        return {"status": "ok", "action": "unblocked"}
+
+    await db.bookings.update_one({"id": booking_id}, {"$set": {"status": "cancelled"}})
+
+    if isinstance(existing_doc.get('created_at'), str):
+        existing_doc['created_at'] = datetime.fromisoformat(existing_doc['created_at'])
+    existing_doc['status'] = 'cancelled'
+    cancelled = Booking(**existing_doc)
+
+    if cancelled.email and cancelled.email != "owner@ajayhaircut.com":
+        asyncio.create_task(_send_cancellation_notification(cancelled))
+
+    return {"status": "ok", "action": "cancelled"}
 
 
 @api_router.post("/contact")
