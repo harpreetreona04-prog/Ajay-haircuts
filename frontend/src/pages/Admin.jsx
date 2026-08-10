@@ -56,6 +56,7 @@ export default function Admin() {
 
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [showCancelled, setShowCancelled] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState("create"); // "create" | "edit"
@@ -94,15 +95,24 @@ export default function Admin() {
   const countsByDate = useMemo(() => {
     const map = {};
     allBookings.forEach((b) => {
+      if (b.status === "cancelled") return; // don't count cancelled toward the day's badge
       map[b.date] = (map[b.date] || 0) + 1;
     });
     return map;
   }, [allBookings]);
 
-  const dayBookings = useMemo(
+  const dayBookingsActive = useMemo(
     () =>
       allBookings
-        .filter((b) => b.date === selectedDate)
+        .filter((b) => b.date === selectedDate && b.status !== "cancelled")
+        .sort((a, b) => a.time.localeCompare(b.time)),
+    [allBookings, selectedDate]
+  );
+
+  const dayBookingsCancelled = useMemo(
+    () =>
+      allBookings
+        .filter((b) => b.date === selectedDate && b.status === "cancelled")
         .sort((a, b) => a.time.localeCompare(b.time)),
     [allBookings, selectedDate]
   );
@@ -313,7 +323,7 @@ export default function Admin() {
           <div>
             <div style={styles.sectionTitle}>{format(new Date(selectedDate + "T00:00:00"), "EEEE, MMM d")}</div>
             <div style={styles.hint}>
-              {loadingBookings ? "Loading..." : `${dayBookings.length} booking${dayBookings.length === 1 ? "" : "s"}`}
+              {loadingBookings ? "Loading..." : `${dayBookingsActive.length} booking${dayBookingsActive.length === 1 ? "" : "s"}`}
             </div>
           </div>
           <button style={styles.btnAdd} onClick={() => openCreateModal(selectedDate, "")}>
@@ -321,7 +331,7 @@ export default function Admin() {
           </button>
         </div>
 
-        {dayBookings.length === 0 ? (
+        {dayBookingsActive.length === 0 ? (
           <div style={styles.hint}>No bookings for this date.</div>
         ) : (
           <table style={styles.table}>
@@ -335,7 +345,7 @@ export default function Admin() {
               </tr>
             </thead>
             <tbody>
-              {dayBookings.map((b) => (
+              {dayBookingsActive.map((b) => (
                 <tr key={b.id}>
                   <td style={styles.td}>
                     {b.time}
@@ -361,6 +371,45 @@ export default function Admin() {
               ))}
             </tbody>
           </table>
+        )}
+
+        {dayBookingsCancelled.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <button
+              style={styles.btnLinkSmall}
+              onClick={() => setShowCancelled((s) => !s)}
+            >
+              {showCancelled ? "Hide" : "Show"} cancelled ({dayBookingsCancelled.length})
+            </button>
+            {showCancelled && (
+              <table style={{ ...styles.table, marginTop: 8 }}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Time</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Service</th>
+                    <th style={styles.th}>Phone</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayBookingsCancelled.map((b) => (
+                    <tr key={b.id} style={{ opacity: 0.6 }}>
+                      <td style={styles.td}>
+                        {b.time}
+                        <div style={styles.durationTag}>{b.duration_minutes || 30} min</div>
+                      </td>
+                      <td style={styles.td}>
+                        {b.name}
+                        <div style={styles.blockedTag}>cancelled</div>
+                      </td>
+                      <td style={{ ...styles.td, textDecoration: "line-through" }}>{b.service}</td>
+                      <td style={styles.td}>{b.phone}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
       </div>
 
