@@ -213,9 +213,35 @@ class TestAdminBookings:
 
         delete = session.delete(f"{API}/admin/bookings/{booking_id}")
         assert delete.status_code == 200
+        assert delete.json()["action"] == "cancelled"
+
+        # Soft-cancel: the booking still exists in the listing...
+        listing = session.get(f"{API}/bookings").json()
+        cancelled_entry = next((b for b in listing if b["id"] == booking_id), None)
+        assert cancelled_entry is not None
+        assert cancelled_entry["status"] == "cancelled"
+
+        # ...but its slot is freed up for someone else to book.
+        avail = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
+        by_time = {s["time"]: s["available"] for s in avail["slots"]}
+        assert by_time.get("01:00 PM") is True
+
+    def test_admin_unblock_removes_block_entirely(self, session):
+        d = future_date(26)
+        create = session.post(f"{API}/admin/bookings", json={
+            "date": d,
+            "time": "04:00 PM",
+            "name": "Break",
+            "is_block": True,
+        })
+        block_id = create.json()["id"]
+
+        delete = session.delete(f"{API}/admin/bookings/{block_id}")
+        assert delete.status_code == 200
+        assert delete.json()["action"] == "unblocked"
 
         listing = session.get(f"{API}/bookings").json()
-        assert not any(b["id"] == booking_id for b in listing)
+        assert not any(b["id"] == block_id for b in listing)
 
 
 # Contact endpoint
