@@ -7,7 +7,13 @@ import { SERVICES, BUSINESS } from "../data/site";
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const STEPS = ["Service", "Date & Time", "Your Info", "Done"];
-const todayStr = () => new Date().toISOString().split("T")[0];
+const todayStr = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 export const BookingDialog = ({ open, onOpenChange, defaultService }) => {
   const [step, setStep] = useState(0);
