@@ -45,18 +45,13 @@ const emptyForm = (date, time) => ({
 });
 
 export default function Admin() {
-  const [unlocked, setUnlocked] = useState(
-    sessionStorage.getItem("admin_ok") === "1"
-  );
-  const [pwInput, setPwInput] = useState("");
-  const [pwError, setPwError] = useState("");
-
   const [allBookings, setAllBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
 
   const [month, setMonth] = useState(startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayStr());
   const [showCancelled, setShowCancelled] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState("create"); // "create" | "edit"
@@ -68,17 +63,6 @@ export default function Admin() {
   const [modalError, setModalError] = useState("");
   const [rowBusyId, setRowBusyId] = useState("");
 
-  const checkPassword = (e) => {
-    e.preventDefault();
-    if (pwInput === ADMIN_PASSWORD && ADMIN_PASSWORD) {
-      sessionStorage.setItem("admin_ok", "1");
-      setUnlocked(true);
-      setPwError("");
-    } else {
-      setPwError("Wrong password. Try again.");
-    }
-  };
-
   const loadAllBookings = () => {
     setLoadingBookings(true);
     axios
@@ -89,13 +73,13 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    if (unlocked) loadAllBookings();
-  }, [unlocked]);
+    loadAllBookings();
+  }, []);
 
   const countsByDate = useMemo(() => {
     const map = {};
     allBookings.forEach((b) => {
-      if (b.status === "cancelled") return; // don't count cancelled toward the day's badge
+      if (b.status === "cancelled" || b.status === "completed") return; // badge only counts upcoming/active
       map[b.date] = (map[b.date] || 0) + 1;
     });
     return map;
@@ -104,7 +88,7 @@ export default function Admin() {
   const dayBookingsActive = useMemo(
     () =>
       allBookings
-        .filter((b) => b.date === selectedDate && b.status !== "cancelled")
+        .filter((b) => b.date === selectedDate && b.status !== "cancelled" && b.status !== "completed")
         .sort((a, b) => a.time.localeCompare(b.time)),
     [allBookings, selectedDate]
   );
@@ -113,6 +97,14 @@ export default function Admin() {
     () =>
       allBookings
         .filter((b) => b.date === selectedDate && b.status === "cancelled")
+        .sort((a, b) => a.time.localeCompare(b.time)),
+    [allBookings, selectedDate]
+  );
+
+  const dayBookingsCompleted = useMemo(
+    () =>
+      allBookings
+        .filter((b) => b.date === selectedDate && b.status === "completed")
         .sort((a, b) => a.time.localeCompare(b.time)),
     [allBookings, selectedDate]
   );
@@ -134,7 +126,7 @@ export default function Admin() {
     const { date, service, excludeId } = opts;
     if (!date) { setSlots([]); return; }
     setSlotsLoading(true);
-    const params = { date, ignore_closed: true, service };
+    const params = { date, ignore_closed: true, admin: true, service };
     if (excludeId) params.exclude_id = excludeId;
     axios
       .get(`${API}/bookings/availability`, { params })
@@ -247,28 +239,21 @@ export default function Admin() {
     }
   };
 
-  if (!unlocked) {
-    return (
-      <div style={styles.lockWrap}>
-        <form onSubmit={checkPassword} style={styles.lockBox}>
-          <div style={styles.eyebrow}>Owner access</div>
-          <h1 style={styles.h1}>Admin Login</h1>
-          <input
-            type="password"
-            placeholder="Enter password"
-            value={pwInput}
-            onChange={(e) => setPwInput(e.target.value)}
-            style={styles.input}
-            autoFocus
-          />
-          {pwError && <div style={styles.error}>{pwError}</div>}
-          <button type="submit" style={styles.btnPrimary}>
-            Unlock
-          </button>
-        </form>
-      </div>
-    );
-  }
+  const completeBooking = async (booking) => {
+    setRowBusyId(booking.id);
+    try {
+      await axios.patch(
+        `${API}/admin/bookings/${booking.id}`,
+        { status: "completed" },
+        { headers: adminHeaders() }
+      );
+      loadAllBookings();
+    } catch (e) {
+      alert("Couldn't mark that booking complete. Please try again.");
+    } finally {
+      setRowBusyId("");
+    }
+  };
 
   return (
     <div style={styles.wrap}>
@@ -359,6 +344,15 @@ export default function Admin() {
                   <td style={styles.td}>{b.phone}</td>
                   <td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
                     <button style={styles.btnLinkSmall} onClick={() => openEditModal(b)}>Edit</button>
+                    {b.status !== "blocked" && (
+                      <button
+                        style={styles.btnLinkSmall}
+                        disabled={rowBusyId === b.id}
+                        onClick={() => completeBooking(b)}
+                      >
+                        Complete
+                      </button>
+                    )}
                     <button
                       style={styles.btnLinkDanger}
                       disabled={rowBusyId === b.id}
@@ -371,6 +365,45 @@ export default function Admin() {
               ))}
             </tbody>
           </table>
+        )}
+
+        {dayBookingsCompleted.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <button
+              style={styles.btnLinkSmall}
+              onClick={() => setShowCompleted((s) => !s)}
+            >
+              {showCompleted ? "Hide" : "Show"} completed ({dayBookingsCompleted.length})
+            </button>
+            {showCompleted && (
+              <table style={{ ...styles.table, marginTop: 8 }}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>Time</th>
+                    <th style={styles.th}>Customer</th>
+                    <th style={styles.th}>Service</th>
+                    <th style={styles.th}>Phone</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayBookingsCompleted.map((b) => (
+                    <tr key={b.id} style={{ opacity: 0.75 }}>
+                      <td style={styles.td}>
+                        {b.time}
+                        <div style={styles.durationTag}>{b.duration_minutes || 30} min</div>
+                      </td>
+                      <td style={styles.td}>
+                        {b.name}
+                        <div style={styles.completedTag}>completed</div>
+                      </td>
+                      <td style={styles.td}>{b.service}</td>
+                      <td style={styles.td}>{b.phone}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
 
         {dayBookingsCancelled.length > 0 && (
@@ -688,6 +721,13 @@ const styles = {
   blockedTag: {
     fontSize: 11,
     color: "#B23A3A",
+    marginTop: 2,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  completedTag: {
+    fontSize: 11,
+    color: "#2F7D4F",
     marginTop: 2,
     textTransform: "uppercase",
     letterSpacing: 0.5,
