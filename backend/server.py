@@ -67,10 +67,15 @@ logger = logging.getLogger(__name__)
 
 
 # Business hours: first appointment can start at OPEN_TIME; every appointment
-# must finish by CLOSE_TIME.
+# must finish by CLOSE_TIME. This is what customers see on the public site.
 OPEN_TIME = "09:00 AM"
 CLOSE_TIME = "09:00 PM"
 SLOT_INTERVAL_MINUTES = 15  # spacing between selectable start times
+
+# The owner can log an earlier walk-in/phone appointment (e.g. someone asks
+# for 7 or 8 AM) directly in the admin dashboard, without that early slot
+# ever being offered to customers on the public booking page.
+ADMIN_OPEN_TIME = os.environ.get("ADMIN_OPEN_TIME", "07:00 AM")
 
 # Duration (in minutes) per service. Anything not listed falls back to
 # DEFAULT_DURATION_MINUTES.
@@ -163,10 +168,10 @@ def _format_clock(dt: datetime) -> str:
     return dt.strftime("%I:%M %p")
 
 
-def _generate_slot_times(duration_minutes: int) -> List[str]:
+def _generate_slot_times(duration_minutes: int, open_time: str = OPEN_TIME) -> List[str]:
     """All possible start times for a service of this length that still
     finish by closing time."""
-    cur = _parse_clock(OPEN_TIME)
+    cur = _parse_clock(open_time)
     close = _parse_clock(CLOSE_TIME)
     slots = []
     while cur + timedelta(minutes=duration_minutes) <= close:
@@ -395,9 +400,12 @@ async def list_bookings(date: Optional[str] = None):
 
 
 @api_router.get("/bookings/availability")
-async def availability(date: str, service: Optional[str] = None, ignore_closed: bool = False, exclude_id: Optional[str] = None):
+async def availability(date: str, service: Optional[str] = None, ignore_closed: bool = False, exclude_id: Optional[str] = None, admin: bool = False):
     duration = _duration_for_service(service) if service else DEFAULT_DURATION_MINUTES
-    candidate_times = _generate_slot_times(duration)
+    # Only the admin dashboard passes admin=true, so only the owner ever
+    # sees/can pick a time earlier than the public site's opening time.
+    open_time = ADMIN_OPEN_TIME if admin else OPEN_TIME
+    candidate_times = _generate_slot_times(duration, open_time=open_time)
 
     if _is_tuesday(date) and not ignore_closed:
         return {"date": date, "closed": True, "slots": [{"time": s, "available": False} for s in candidate_times]}
@@ -451,8 +459,8 @@ async def admin_create_booking(payload: AdminBookingCreate, x_admin_key: Optiona
     doc = booking.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.bookings.insert_one(doc)
-    if not payload.is_block:
-        asyncio.create_task(_send_confirmation(booking))
+    # No customer email for manual/phone entries — these are logged by the
+    # owner after the call, not booked by the customer themselves.
     return booking
 
 
@@ -501,9 +509,15 @@ async def admin_update_booking(booking_id: str, payload: AdminBookingUpdate, x_a
         merged['created_at'] = datetime.fromisoformat(merged['created_at'])
     updated = Booking(**merged)
 
-    # Only real customer bookings have a genuine email to notify — blocks
-    # are stored with a placeholder address and shouldn't trigger email.
-    if updated.status != "blocked" and updated.email and updated.email != "owner@ajayhaircut.com":
+    # Only send a "your booking has changed" email for real reschedule/
+    # detail changes — not for a plain status update like marking a
+    # booking "completed" (that's an internal record-keeping action, not
+    # something the customer needs to be told about).
+    is_reschedule = any(
+        getattr(payload, field) is not None
+        for field in ("date", "time", "service", "duration_minutes")
+    )
+    if is_reschedule and updated.status != "blocked" and updated.email and updated.email != "owner@ajayhaircut.com":
         asyncio.create_task(_send_reschedule_notification(updated))
 
     return updated
