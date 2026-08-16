@@ -407,10 +407,13 @@ async def create_booking(payload: BookingCreate):
 @api_router.get("/bookings", response_model=List[Booking])
 async def list_bookings(date: Optional[str] = None):
     query = {"date": date} if date else {}
-    docs = await db.bookings.find(query, {"_id": 0}).sort([("date", 1), ("time", 1)]).to_list(1000)
+    docs = await db.bookings.find(query, {"_id": 0}).to_list(1000)
     for d in docs:
         if isinstance(d.get('created_at'), str):
             d['created_at'] = datetime.fromisoformat(d['created_at'])
+    # Sort by actual time-of-day, not alphabetically — a plain string sort
+    # would put "01:00 PM" before "09:00 AM" since '1' < '9'.
+    docs.sort(key=lambda d: (d.get('date', ''), _parse_clock(d.get('time', '12:00 AM'))))
     return docs
 
 
