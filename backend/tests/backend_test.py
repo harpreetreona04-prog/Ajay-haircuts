@@ -276,6 +276,67 @@ class TestAdminBookings:
         listing = session.get(f"{API}/bookings").json()
         assert not any(b["id"] == block_id for b in listing)
 
+    def test_mark_booking_completed_does_not_trigger_reschedule_email_path(self, session):
+        # We can't assert on email delivery here, but we can assert the
+        # status actually changes and nothing else about the booking does.
+        d = future_date(27)
+        create = session.post(f"{API}/admin/bookings", json={
+            "service": "Skin Fades",
+            "date": d,
+            "time": "02:00 PM",
+            "name": "TEST_Complete Me",
+        })
+        booking_id = create.json()["id"]
+
+        edit = session.patch(f"{API}/admin/bookings/{booking_id}", json={"status": "completed"})
+        assert edit.status_code == 200, edit.text
+        updated = edit.json()
+        assert updated["status"] == "completed"
+        assert updated["time"] == "02:00 PM"  # unchanged
+
+
+# Whole-day closures (owner blocks the shop for a day)
+class TestClosedDates:
+    def test_close_and_reopen_a_day(self, session):
+        d = future_date(30)
+
+        close = session.post(f"{API}/admin/closed-dates", json={"date": d, "reason": "Owner on vacation"})
+        assert close.status_code == 200, close.text
+
+        listed = session.get(f"{API}/closed-dates").json()
+        assert any(x["date"] == d for x in listed)
+
+        avail = session.get(f"{API}/bookings/availability", params={"date": d}).json()
+        assert avail["closed"] is True
+
+        booking_attempt = session.post(f"{API}/bookings", json={
+            "service": "Skin Fades",
+            "date": d,
+            "time": "10:00 AM",
+            "name": "TEST_ShouldFail",
+            "email": "delivered@resend.dev",
+            "phone": "+17783442550",
+        })
+        assert booking_attempt.status_code == 400
+
+        reopen = session.delete(f"{API}/admin/closed-dates/{d}")
+        assert reopen.status_code == 200
+
+        avail_after = session.get(f"{API}/bookings/availability", params={"date": d}).json()
+        assert avail_after["closed"] is False
+
+    def test_admin_can_still_use_ignore_closed_on_manually_closed_day(self, session):
+        d = future_date(31)
+        session.post(f"{API}/admin/closed-dates", json={"date": d})
+
+        avail = session.get(
+            f"{API}/bookings/availability",
+            params={"date": d, "ignore_closed": True, "admin": True},
+        ).json()
+        assert avail["closed"] is False
+
+        session.delete(f"{API}/admin/closed-dates/{d}")
+
 
 # Contact endpoint
 class TestContact:
