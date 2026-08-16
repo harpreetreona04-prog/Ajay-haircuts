@@ -63,6 +63,9 @@ export default function Admin() {
   const [modalError, setModalError] = useState("");
   const [rowBusyId, setRowBusyId] = useState("");
 
+  const [closedDates, setClosedDates] = useState({}); // { "yyyy-MM-dd": reason }
+  const [dayClosedBusy, setDayClosedBusy] = useState(false);
+
   const loadAllBookings = () => {
     setLoadingBookings(true);
     axios
@@ -72,8 +75,22 @@ export default function Admin() {
       .finally(() => setLoadingBookings(false));
   };
 
+  const loadClosedDates = () => {
+    axios
+      .get(`${API}/closed-dates`)
+      .then(({ data }) => {
+        const map = {};
+        (Array.isArray(data) ? data : []).forEach((d) => {
+          map[d.date] = d.reason || "";
+        });
+        setClosedDates(map);
+      })
+      .catch(() => setClosedDates({}));
+  };
+
   useEffect(() => {
     loadAllBookings();
+    loadClosedDates();
   }, []);
 
   const countsByDate = useMemo(() => {
@@ -255,6 +272,32 @@ export default function Admin() {
     }
   };
 
+  const isSelectedDateClosed = Object.prototype.hasOwnProperty.call(closedDates, selectedDate);
+
+  const toggleSelectedDateClosed = async () => {
+    setDayClosedBusy(true);
+    try {
+      if (isSelectedDateClosed) {
+        await axios.delete(`${API}/admin/closed-dates/${selectedDate}`, { headers: adminHeaders() });
+      } else {
+        if (!window.confirm(`Block the whole day (${selectedDate}) — no customer will be able to book anything on it. Continue?`)) {
+          setDayClosedBusy(false);
+          return;
+        }
+        await axios.post(
+          `${API}/admin/closed-dates`,
+          { date: selectedDate, reason: "" },
+          { headers: adminHeaders() }
+        );
+      }
+      loadClosedDates();
+    } catch (e) {
+      alert("Couldn't update that date. Please try again.");
+    } finally {
+      setDayClosedBusy(false);
+    }
+  };
+
   return (
     <div style={styles.wrap}>
       <header style={styles.header}>
@@ -283,6 +326,7 @@ export default function Admin() {
             const count = countsByDate[ds] || 0;
             const isSelected = ds === selectedDate;
             const isTuesday = d.getDay() === 2;
+            const isManuallyClosed = Object.prototype.hasOwnProperty.call(closedDates, ds);
             return (
               <button
                 key={ds}
@@ -295,7 +339,7 @@ export default function Admin() {
                 }}
               >
                 <span style={{ ...styles.dayNum, color: isSelected ? "#fff" : "#1C2340" }}>{format(d, "d")}</span>
-                {isTuesday && <span style={styles.dayClosedTag}>closed</span>}
+                {(isTuesday || isManuallyClosed) && <span style={styles.dayClosedTag}>closed</span>}
                 {count > 0 && (
                   <span style={isSelected ? styles.dayCountSelected : styles.dayCount}>{count}</span>
                 )}
@@ -311,10 +355,25 @@ export default function Admin() {
               {loadingBookings ? "Loading..." : `${dayBookingsActive.length} booking${dayBookingsActive.length === 1 ? "" : "s"}`}
             </div>
           </div>
-          <button style={styles.btnAdd} onClick={() => openCreateModal(selectedDate, "")}>
-            + Add booking
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              style={isSelectedDateClosed ? styles.btnAddSecondary : styles.btnAddDanger}
+              disabled={dayClosedBusy}
+              onClick={toggleSelectedDateClosed}
+            >
+              {dayClosedBusy ? "..." : isSelectedDateClosed ? "Unblock day" : "Block whole day"}
+            </button>
+            <button style={styles.btnAdd} onClick={() => openCreateModal(selectedDate, "")}>
+              + Add booking
+            </button>
+          </div>
         </div>
+
+        {isSelectedDateClosed && (
+          <div style={styles.closedNotice}>
+            Shop marked closed for this date — customers can't book any time on it.
+          </div>
+        )}
 
         {dayBookingsActive.length === 0 ? (
           <div style={styles.hint}>No bookings for this date.</div>
@@ -706,6 +765,34 @@ const styles = {
     fontWeight: 600,
     fontSize: 13,
     cursor: "pointer",
+  },
+  btnAddDanger: {
+    padding: "8px 14px",
+    background: "#fff",
+    color: "#B23A3A",
+    border: "1px solid #E7B8B8",
+    borderRadius: 8,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  btnAddSecondary: {
+    padding: "8px 14px",
+    background: "#fff",
+    color: "#2F7D4F",
+    border: "1px solid #BFE0CC",
+    borderRadius: 8,
+    fontWeight: 600,
+    fontSize: 13,
+    cursor: "pointer",
+  },
+  closedNotice: {
+    background: "#FDEEEE",
+    color: "#B23A3A",
+    fontSize: 12,
+    padding: "8px 12px",
+    borderRadius: 8,
+    marginBottom: 12,
   },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 14, marginTop: 8 },
   th: {
