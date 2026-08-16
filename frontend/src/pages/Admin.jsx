@@ -27,6 +27,17 @@ const adminHeaders = () =>
 const todayStr = () => format(new Date(), "yyyy-MM-dd");
 const toDateStr = (d) => format(d, "yyyy-MM-dd");
 
+// "09:00 AM" / "01:30 PM" -> minutes since midnight, so bookings sort in
+// actual chronological order instead of alphabetically (which would put
+// "01:00 PM" before "09:00 AM" since '1' < '9').
+const timeToMinutes = (t) => {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec((t || "").trim());
+  if (!m) return 0;
+  let hours = parseInt(m[1], 10) % 12;
+  if (m[3].toUpperCase() === "PM") hours += 12;
+  return hours * 60 + parseInt(m[2], 10);
+};
+
 const WALKIN_SERVICE = "Phone / Walk-in";
 const SERVICE_OPTIONS = [WALKIN_SERVICE, ...SERVICES.map((s) => s.title)];
 
@@ -106,7 +117,7 @@ export default function Admin() {
     () =>
       allBookings
         .filter((b) => b.date === selectedDate && b.status !== "cancelled" && b.status !== "completed")
-        .sort((a, b) => a.time.localeCompare(b.time)),
+        .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time)),
     [allBookings, selectedDate]
   );
 
@@ -114,7 +125,7 @@ export default function Admin() {
     () =>
       allBookings
         .filter((b) => b.date === selectedDate && b.status === "cancelled")
-        .sort((a, b) => a.time.localeCompare(b.time)),
+        .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time)),
     [allBookings, selectedDate]
   );
 
@@ -122,7 +133,7 @@ export default function Admin() {
     () =>
       allBookings
         .filter((b) => b.date === selectedDate && b.status === "completed")
-        .sort((a, b) => a.time.localeCompare(b.time)),
+        .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time)),
     [allBookings, selectedDate]
   );
 
