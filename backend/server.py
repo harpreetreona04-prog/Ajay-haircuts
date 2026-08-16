@@ -44,7 +44,7 @@ def _require_admin(x_admin_key: Optional[str]):
 BUSINESS = {
     "name": "Ajay Haircut",
     "phone": "(778) 344-2550",
-    "location": "Surrey, BC, Canada",
+    "location": "Unit 102, 9385 120 St, Surrey, BC",
 }
 
 # Surrey, BC is in the Pacific timezone. Used so "is this slot already in
@@ -147,6 +147,11 @@ class AdminBookingUpdate(BaseModel):
     status: Optional[str] = None
 
 
+class ClosedDateCreate(BaseModel):
+    date: str
+    reason: Optional[str] = ""
+
+
 def _duration_for_service(service: str) -> int:
     return SERVICE_DURATIONS.get(service, DEFAULT_DURATION_MINUTES)
 
@@ -156,6 +161,12 @@ def _is_tuesday(date: str) -> bool:
         return datetime.strptime(date, "%Y-%m-%d").weekday() == 1
     except ValueError:
         return False
+
+
+async def _closed_date_doc(date: str):
+    """Returns the closure document for this date if the owner has manually
+    blocked the whole day off (e.g. shop closed for a trip), else None."""
+    return await db.closed_dates.find_one({"date": date}, {"_id": 0})
 
 
 def _parse_clock(t: str) -> datetime:
@@ -366,6 +377,10 @@ async def create_booking(payload: BookingCreate):
     if _is_tuesday(payload.date):
         raise HTTPException(status_code=400, detail="We are closed on Tuesdays. Please choose another day.")
 
+    closed_doc = await _closed_date_doc(payload.date)
+    if closed_doc:
+        raise HTTPException(status_code=400, detail="We're closed that day. Please choose another date.")
+
     duration = _duration_for_service(payload.service)
     try:
         new_start = _parse_clock(payload.time)
@@ -407,8 +422,10 @@ async def availability(date: str, service: Optional[str] = None, ignore_closed: 
     open_time = ADMIN_OPEN_TIME if admin else OPEN_TIME
     candidate_times = _generate_slot_times(duration, open_time=open_time)
 
-    if _is_tuesday(date) and not ignore_closed:
-        return {"date": date, "closed": True, "slots": [{"time": s, "available": False} for s in candidate_times]}
+    if not ignore_closed:
+        closed_doc = await _closed_date_doc(date)
+        if _is_tuesday(date) or closed_doc:
+            return {"date": date, "closed": True, "slots": [{"time": s, "available": False} for s in candidate_times]}
 
     booked = await _booked_intervals(date, exclude_id=exclude_id)
 
@@ -555,6 +572,39 @@ async def admin_delete_booking(booking_id: str, x_admin_key: Optional[str] = Hea
         asyncio.create_task(_send_cancellation_notification(cancelled))
 
     return {"status": "ok", "action": "cancelled"}
+
+
+@api_router.get("/closed-dates")
+async def list_closed_dates():
+    """Public — used by both the customer site and the admin calendar to
+    mark manually-closed days (e.g. shop closed for a trip)."""
+    docs = await db.closed_dates.find({}, {"_id": 0}).to_list(1000)
+    return docs
+
+
+@api_router.post("/admin/closed-dates")
+async def admin_close_date(payload: ClosedDateCreate, x_admin_key: Optional[str] = Header(None)):
+    """Owner-only: block off an entire day — no customer can book any time
+    on it, regardless of what's otherwise open. Existing bookings already on
+    that day are left untouched; cancel them separately if needed."""
+    _require_admin(x_admin_key)
+    await db.closed_dates.update_one(
+        {"date": payload.date},
+        {"$set": {"date": payload.date, "reason": payload.reason or ""}},
+        upsert=True,
+    )
+    return {"status": "ok", "date": payload.date}
+
+
+@api_router.delete("/admin/closed-dates/{date}")
+async def admin_open_date(date: str, x_admin_key: Optional[str] = Header(None)):
+    """Owner-only: undo a whole-day closure, making that date bookable
+    again (subject to the normal Tuesday-closed rule)."""
+    _require_admin(x_admin_key)
+    result = await db.closed_dates.delete_one({"date": date})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="That date wasn't marked closed.")
+    return {"status": "ok", "date": date}
 
 
 @api_router.post("/contact")
