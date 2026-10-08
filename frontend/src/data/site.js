@@ -26,6 +26,14 @@ export const IMAGES = {
 
 export const SERVICES = [
   {
+    title: "Beard Trim and Threading",
+    desc: "Clean beard trim with precise threading for sharp, defined lines.",
+    price: "$20",
+    duration: 30,
+    img: "https://images.unsplash.com/photo-1610475680335-dafab5475150?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
+    icon: "Droplets",
+  },
+  {
     title: "Men's Haircuts",
     desc: "Precision cuts tailored to your face shape and lifestyle.",
     price: "$25",
@@ -80,14 +88,6 @@ export const SERVICES = [
     duration: 30,
     img: "https://images.unsplash.com/photo-1728949202477-bad2935775cb?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
     icon: "Leaf",
-  },
-  {
-    title: "Styling & Wash",
-    desc: "Refreshing wash paired with a clean, polished style.",
-    price: "$20",
-    duration: 30,
-    img: "https://images.unsplash.com/photo-1610475680335-dafab5475150?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200",
-    icon: "Droplets",
   },
 ];
 
