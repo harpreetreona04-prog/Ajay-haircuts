@@ -46,13 +46,53 @@ class TestAvailability:
         for slot in data["slots"]:
             assert "time" in slot and "available" in slot
 
-    def test_longer_service_has_fewer_slots(self, session):
-        # A 45-min service (Haircut & Beard) must finish by closing time,
-        # so it has fewer possible start times than a 30-min service.
+    def test_customers_cannot_pick_830pm_but_admin_can(self, session):
         d = future_date(4)
-        short = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
-        longer = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Haircut & Beard"}).json()
-        assert len(longer["slots"]) < len(short["slots"])
+        for service in ("Skin Fades", "Haircut & Beard"):
+            cust = session.get(f"{API}/bookings/availability", params={"date": d, "service": service}).json()
+            times = [s["time"] for s in cust["slots"]]
+            assert "08:30 PM" not in times
+            assert times[-1] == "08:15 PM"
+            assert times[0] == "09:00 AM"
+        admin = session.get(
+            f"{API}/bookings/availability",
+            params={"date": d, "service": "Skin Fades", "admin": True},
+        ).json()
+        admin_times = [s["time"] for s in admin["slots"]]
+        assert admin_times[0] == "07:00 AM"
+        assert admin_times[-1] == "08:30 PM"
+
+    def test_beard_trimming_is_15_minutes(self, session):
+        # A 15-min Beard Trimming at 10:00 AM only occupies 10:00-10:15, so
+        # a 30-min service can start right at 10:15 but not at 09:45.
+        d = future_date(12)
+        r = session.post(f"{API}/bookings", json={
+            "service": "Beard Trimming & Styling",
+            "date": d,
+            "time": "10:00 AM",
+            "name": "TEST_BeardTrim",
+            "email": "delivered@resend.dev",
+            "phone": "+17783442550",
+        })
+        assert r.status_code == 200, r.text
+        assert r.json()["duration_minutes"] == 15
+
+        avail = session.get(f"{API}/bookings/availability", params={"date": d, "service": "Skin Fades"}).json()
+        by_time = {s["time"]: s["available"] for s in avail["slots"]}
+        assert by_time["10:00 AM"] is False
+        assert by_time["09:45 AM"] is False   # a 30-min cut from 9:45 would run into 10:00
+        assert by_time["10:15 AM"] is True    # free the moment the 15 min ends
+
+    def test_customer_booking_at_830pm_rejected(self, session):
+        r = session.post(f"{API}/bookings", json={
+            "service": "Skin Fades",
+            "date": future_date(6),
+            "time": "08:30 PM",
+            "name": "TEST_TooLate",
+            "email": "delivered@resend.dev",
+            "phone": "+17783442550",
+        })
+        assert r.status_code == 400
 
     def test_todays_past_slots_are_unavailable(self, session):
         today = datetime.now(BUSINESS_TZ).strftime("%Y-%m-%d")
