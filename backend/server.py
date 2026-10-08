@@ -26,6 +26,15 @@ OWNER_EMAIL = os.environ.get('OWNER_EMAIL')
 # Supports one or more addresses in OWNER_EMAIL, comma-separated, e.g.
 # OWNER_EMAIL=ajay@example.com,harpreetreona04@gmail.com,other@example.com
 OWNER_EMAILS = [e.strip() for e in OWNER_EMAIL.split(',')] if OWNER_EMAIL else []
+
+# SMS reminders (Twilio). Set all three in the backend's environment
+# variables; if any is missing, SMS is simply skipped (email still works).
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
+TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
+
+# How long before the appointment the reminder goes out.
+REMINDER_HOURS_BEFORE = float(os.environ.get('REMINDER_HOURS_BEFORE', '2'))
 if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
 
@@ -72,6 +81,10 @@ OPEN_TIME = "09:00 AM"
 CLOSE_TIME = "09:00 PM"
 SLOT_INTERVAL_MINUTES = 15  # spacing between selectable start times
 
+# Latest start time customers can pick on the public site. The owner can
+# still add a later manual booking from the admin dashboard.
+CUSTOMER_LAST_START = os.environ.get("CUSTOMER_LAST_START", "08:15 PM")
+
 # The owner can log an earlier walk-in/phone appointment (e.g. someone asks
 # for 7 or 8 AM) directly in the admin dashboard, without that early slot
 # ever being offered to customers on the public booking page.
@@ -81,6 +94,7 @@ ADMIN_OPEN_TIME = os.environ.get("ADMIN_OPEN_TIME", "07:00 AM")
 # DEFAULT_DURATION_MINUTES.
 SERVICE_DURATIONS = {
     "Haircut & Beard": 45,
+    "Beard Trimming & Styling": 15,
 }
 DEFAULT_DURATION_MINUTES = 30
 WALKIN_SERVICE = "Phone / Walk-in"
@@ -109,6 +123,7 @@ class Booking(BaseModel):
     notes: Optional[str] = ""
     duration_minutes: int = DEFAULT_DURATION_MINUTES
     status: str = "confirmed"
+    reminder_sent: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -179,13 +194,16 @@ def _format_clock(dt: datetime) -> str:
     return dt.strftime("%I:%M %p")
 
 
-def _generate_slot_times(duration_minutes: int, open_time: str = OPEN_TIME) -> List[str]:
+def _generate_slot_times(duration_minutes: int, open_time: str = OPEN_TIME, last_start: Optional[str] = None) -> List[str]:
     """All possible start times for a service of this length that still
-    finish by closing time."""
+    finish by closing time (and, if given, don't start after last_start)."""
     cur = _parse_clock(open_time)
     close = _parse_clock(CLOSE_TIME)
+    latest = _parse_clock(last_start) if last_start else None
     slots = []
     while cur + timedelta(minutes=duration_minutes) <= close:
+        if latest is not None and cur > latest:
+            break
         slots.append(_format_clock(cur))
         cur += timedelta(minutes=SLOT_INTERVAL_MINUTES)
     return slots
@@ -387,6 +405,9 @@ async def create_booking(payload: BookingCreate):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid time format.")
 
+    if new_start > _parse_clock(CUSTOMER_LAST_START):
+        raise HTTPException(status_code=400, detail="That time isn't available for online booking. Please choose an earlier time.")
+
     if payload.date == _today_str():
         now_clock = _parse_clock(_now_local().strftime("%I:%M %p"))
         if new_start <= now_clock:
@@ -423,7 +444,11 @@ async def availability(date: str, service: Optional[str] = None, ignore_closed: 
     # Only the admin dashboard passes admin=true, so only the owner ever
     # sees/can pick a time earlier than the public site's opening time.
     open_time = ADMIN_OPEN_TIME if admin else OPEN_TIME
-    candidate_times = _generate_slot_times(duration, open_time=open_time)
+    candidate_times = _generate_slot_times(
+        duration,
+        open_time=open_time,
+        last_start=None if admin else CUSTOMER_LAST_START,
+    )
 
     if not ignore_closed:
         closed_doc = await _closed_date_doc(date)
@@ -497,6 +522,10 @@ async def admin_update_booking(booking_id: str, payload: AdminBookingUpdate, x_a
 
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     merged = {**existing_doc, **updates}
+
+    # A new date/time means the customer needs a fresh reminder for it.
+    if payload.date is not None or payload.time is not None:
+        merged['reminder_sent'] = False
 
     if payload.duration_minutes is not None:
         new_duration = payload.duration_minutes
@@ -619,6 +648,154 @@ async def contact(payload: ContactCreate):
     return {"status": "ok", "message": "Thanks for reaching out. We'll be in touch soon."}
 
 
+
+# ---------------------------------------------------------------------------
+# Reminders: email + SMS, REMINDER_HOURS_BEFORE hours before an appointment
+# ---------------------------------------------------------------------------
+PLACEHOLDER_EMAIL = "owner@ajayhaircut.com"
+
+
+def _normalize_phone(raw: Optional[str]) -> Optional[str]:
+    """Turn what a customer typed into E.164 (+1XXXXXXXXXX), or None if it
+    doesn't look like a real number (e.g. the admin's 'N/A')."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if raw.startswith("+"):
+        return "+" + digits if 10 <= len(digits) <= 15 else None
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    return None
+
+
+def _reminder_html(b: Booking) -> str:
+    return f"""
+    <div style="font-family: Arial, Helvetica, sans-serif; background:#FAFAFA; padding:32px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #E5E7EB;">
+        <tr><td style="background:#111827;padding:28px 32px;">
+          <span style="color:#C5A059;font-size:22px;font-weight:700;letter-spacing:1px;">AJAY HAIRCUT</span>
+          <div style="color:#9CA3AF;font-size:12px;letter-spacing:3px;margin-top:4px;">SURREY, BC</div>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="color:#111827;font-size:24px;margin:0 0 8px;">Appointment Reminder</h1>
+          <p style="color:#4B5563;font-size:15px;margin:0 0 24px;">Hi {b.name}, this is a friendly reminder that your appointment is coming up soon.</p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E5E7EB;">
+            <tr><td style="padding:14px 0;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Service</td><td style="padding:14px 0;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.service}</td></tr>
+            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Date</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.date}</td></tr>
+            <tr><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#6B7280;font-size:13px;text-transform:uppercase;letter-spacing:1px;">Time</td><td style="padding:14px 0;border-top:1px solid #F3F4F6;color:#111827;font-size:15px;font-weight:600;text-align:right;">{b.time}</td></tr>
+          </table>
+          <div style="margin-top:28px;padding:20px;background:#FAFAFA;border:1px solid #E5E7EB;">
+            <p style="margin:0;color:#111827;font-size:14px;"><strong>{BUSINESS['name']}</strong></p>
+            <p style="margin:6px 0 0;color:#4B5563;font-size:14px;">{BUSINESS['location']}</p>
+            <p style="margin:6px 0 0;color:#C5A059;font-size:14px;font-weight:600;">{BUSINESS['phone']}</p>
+          </div>
+          <p style="color:#9CA3AF;font-size:12px;margin-top:24px;">Need to change or cancel? Please call us at {BUSINESS['phone']}.</p>
+        </td></tr>
+      </table>
+    </div>
+    """
+
+
+def _reminder_sms_text(b: Booking) -> str:
+    return (
+        f"Hi {b.name}, reminder: your {b.service} appointment at {BUSINESS['name']} "
+        f"is on {b.date} at {b.time}. {BUSINESS['location']}. "
+        f"To change or cancel, call {BUSINESS['phone']}."
+    )
+
+
+def _send_sms_blocking(to_number: str, body: str):
+    from twilio.rest import Client  # imported lazily so the app still boots without it
+    Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN).messages.create(
+        to=to_number, from_=TWILIO_PHONE_NUMBER, body=body
+    )
+
+
+async def _send_sms(to_raw: Optional[str], body: str):
+    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER):
+        logger.warning("Twilio env vars not set; skipping SMS")
+        return
+    to_number = _normalize_phone(to_raw)
+    if not to_number:
+        logger.info(f"No usable phone number ({to_raw!r}); skipping SMS")
+        return
+    try:
+        await asyncio.to_thread(_send_sms_blocking, to_number, body)
+        logger.info(f"Reminder SMS sent to {to_number}")
+    except Exception as e:
+        logger.error(f"Failed to send SMS to {to_number}: {e}")
+
+
+async def _send_reminders(b: Booking):
+    if b.email and b.email != PLACEHOLDER_EMAIL:
+        await _send_email(b.email, f"Reminder: your appointment today at {b.time}", _reminder_html(b))
+    await _send_sms(b.phone, _reminder_sms_text(b))
+
+
+def _appointment_dt(date: str, time_str: str) -> Optional[datetime]:
+    try:
+        naive = datetime.strptime(f"{date} {time_str}", "%Y-%m-%d %I:%M %p")
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=BUSINESS_TZ)
+
+
+async def _process_due_reminders():
+    """Find today's confirmed bookings that are inside the reminder window
+    and haven't been reminded yet, and send each one exactly once."""
+    now = _now_local()
+    docs = await db.bookings.find(
+        {"date": _today_str(), "status": "confirmed", "reminder_sent": {"$ne": True}},
+        {"_id": 0},
+    ).to_list(500)
+
+    for d in docs:
+        appt = _appointment_dt(d["date"], d["time"])
+        if appt is None or now >= appt:
+            continue  # unparseable, or the appointment has already started
+        window_start = appt - timedelta(hours=REMINDER_HOURS_BEFORE)
+        if now < window_start:
+            continue  # not time yet
+
+        # Claim it first so two server instances can't both send it.
+        claimed = await db.bookings.find_one_and_update(
+            {"id": d["id"], "reminder_sent": {"$ne": True}},
+            {"$set": {"reminder_sent": True}},
+        )
+        if not claimed:
+            continue
+
+        # If the customer booked inside the reminder window (e.g. booked at
+        # 1 PM for 2 PM), they were just confirmed — a reminder would be noise.
+        created = d.get("created_at")
+        if isinstance(created, str):
+            created = datetime.fromisoformat(created)
+        if created is not None:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if created > window_start:
+                continue
+
+        if isinstance(d.get("created_at"), str):
+            d["created_at"] = datetime.fromisoformat(d["created_at"])
+        try:
+            await _send_reminders(Booking(**d))
+        except Exception as e:
+            logger.error(f"Reminder failed for booking {d.get('id')}: {e}")
+
+
+async def _reminder_loop():
+    while True:
+        try:
+            await _process_due_reminders()
+        except Exception as e:
+            logger.error(f"Reminder loop error: {e}")
+        await asyncio.sleep(60)
+
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -628,6 +805,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def start_reminder_loop():
+    asyncio.create_task(_reminder_loop())
 
 
 @app.on_event("shutdown")
