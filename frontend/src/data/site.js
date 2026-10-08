@@ -53,7 +53,7 @@ export const SERVICES = [
     title: "Beard Trimming & Styling",
     desc: "Shaping, lining and hot-towel detailing for a crisp finish.",
     price: "$20",
-    duration: 30,
+    duration: 15,
     img: "https://images.pexels.com/photos/9153970/pexels-photo-9153970.jpeg",
     icon: "Wind",
   },
