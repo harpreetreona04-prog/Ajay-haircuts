@@ -504,8 +504,10 @@ async def admin_create_booking(payload: AdminBookingCreate, x_admin_key: Optiona
     doc = booking.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.bookings.insert_one(doc)
-    # No customer email for manual/phone entries — these are logged by the
-    # owner after the call, not booked by the customer themselves.
+    # No customer email for manual/phone entries, but if the owner typed in
+    # a phone number the customer gets a confirmation text straight away.
+    if not payload.is_block:
+        asyncio.create_task(_send_sms(booking.phone, _confirmation_sms_text(booking)))
     return booking
 
 
@@ -699,11 +701,31 @@ def _reminder_html(b: Booking) -> str:
     """
 
 
-def _reminder_sms_text(b: Booking) -> str:
+def _confirmation_sms_text(b: Booking) -> str:
+    """One-segment (<160 chars) confirmation for bookings the owner enters
+    by hand. Non-English names are left out, same reason as the reminder."""
+    first = (b.name.split() or [""])[0][:12]
+    greeting = f"Hi {first}," if first and first.isascii() else "Hi,"
+    try:
+        when = datetime.strptime(b.date, "%Y-%m-%d").strftime("%a, %b %d").replace(" 0", " ")
+    except ValueError:
+        when = b.date
     return (
-        f"Hi {b.name}, reminder: your {b.service} appointment at {BUSINESS['name']} "
-        f"is on {b.date} at {b.time}. {BUSINESS['location']}. "
-        f"To change or cancel, call {BUSINESS['phone']}."
+        f"Ajay Haircut: {greeting} you're booked for {when} at {b.time}. "
+        f"{BUSINESS['location']}. Change/cancel: {BUSINESS['phone']}"
+    )
+
+
+def _reminder_sms_text(b: Booking) -> str:
+    """Kept under 160 characters so each reminder is billed as one SMS
+    segment (the reminder always goes out the same day, so no date needed).
+    Names with non-English characters are left out: they would force the
+    message into a format that fits only 70 characters per segment."""
+    first = (b.name.split() or [""])[0][:15]
+    greeting = f"Hi {first}," if first and first.isascii() else "Hi,"
+    return (
+        f"Ajay Haircut reminder: {greeting} your appointment is today at {b.time}. "
+        f"{BUSINESS['location']}. Change/cancel: {BUSINESS['phone']}"
     )
 
 
