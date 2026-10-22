@@ -335,6 +335,33 @@ class TestAdminBookings:
         assert updated["time"] == "02:00 PM"  # unchanged
 
 
+# Listing bookings for the admin calendar
+class TestListRange:
+    def test_list_by_date_range_returns_only_that_range(self, session):
+        d_in = future_date(40)
+        d_out = future_date(60)
+        for d, name in ((d_in, "TEST_InRange"), (d_out, "TEST_OutOfRange")):
+            r = session.post(f"{API}/admin/bookings", json={
+                "service": "Skin Fades", "date": d, "time": "10:00 AM", "name": name,
+            })
+            assert r.status_code == 200, r.text
+
+        r = session.get(f"{API}/bookings", params={"date_from": d_in, "date_to": d_in})
+        assert r.status_code == 200
+        names = [b["name"] for b in r.json()]
+        assert "TEST_InRange" in names
+        assert "TEST_OutOfRange" not in names
+
+    def test_list_is_sorted_by_time_of_day(self, session):
+        d = future_date(41)
+        for t in ("05:00 PM", "09:00 AM", "01:00 PM"):
+            session.post(f"{API}/admin/bookings", json={
+                "service": "Skin Fades", "date": d, "time": t, "name": f"TEST_Sort {t}",
+            })
+        times = [b["time"] for b in session.get(f"{API}/bookings", params={"date": d}).json()]
+        assert times == ["09:00 AM", "01:00 PM", "05:00 PM"]
+
+
 # Whole-day closures (owner blocks the shop for a day)
 class TestClosedDates:
     def test_close_and_reopen_a_day(self, session):
