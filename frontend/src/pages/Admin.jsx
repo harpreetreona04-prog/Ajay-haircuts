@@ -77,12 +77,28 @@ export default function Admin() {
   const [closedDates, setClosedDates] = useState({}); // { "yyyy-MM-dd": reason }
   const [dayClosedBusy, setDayClosedBusy] = useState(false);
 
+  const [loadError, setLoadError] = useState("");
+
   const loadAllBookings = () => {
     setLoadingBookings(true);
+    // Only ask for the weeks the calendar is showing, so the list never has
+    // to carry the shop's whole history.
+    const from = toDateStr(startOfWeek(startOfMonth(month)));
+    const to = toDateStr(endOfWeek(endOfMonth(month)));
     axios
-      .get(`${API}/bookings`)
-      .then(({ data }) => setAllBookings(Array.isArray(data) ? data : []))
-      .catch(() => setAllBookings([]))
+      .get(`${API}/bookings`, { params: { date_from: from, date_to: to } })
+      .then(({ data }) => {
+        setAllBookings(Array.isArray(data) ? data : []);
+        setLoadError("");
+      })
+      .catch((e) => {
+        setAllBookings([]);
+        setLoadError(
+          e?.response
+            ? `Server error ${e.response.status}`
+            : "Can't reach the server (it may be waking up)"
+        );
+      })
       .finally(() => setLoadingBookings(false));
   };
 
@@ -100,9 +116,21 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    loadAllBookings();
     loadClosedDates();
   }, []);
+
+  useEffect(() => {
+    loadAllBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [month]);
+
+  // If the selected day sits in a different month (e.g. a booking was just
+  // added for next month), jump the calendar there so its bookings load.
+  useEffect(() => {
+    const target = startOfMonth(new Date(selectedDate + "T00:00:00"));
+    if (target.getTime() !== month.getTime()) setMonth(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate]);
 
   const countsByDate = useMemo(() => {
     const map = {};
@@ -329,6 +357,13 @@ export default function Admin() {
             <div key={i} style={styles.weekDay}>{d}</div>
           ))}
         </div>
+
+        {loadError && (
+          <div style={styles.closedNotice}>
+            Couldn't load bookings: {loadError}.{" "}
+            <button style={styles.btnLinkSmall} onClick={loadAllBookings}>Try again</button>
+          </div>
+        )}
 
         <div style={styles.calendarGrid}>
           {calendarDays.map((d) => {
