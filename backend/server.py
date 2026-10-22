@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -228,7 +228,10 @@ async def _booked_intervals(date: str, exclude_id: Optional[str] = None):
     ).to_list(1000)
     intervals = []
     for d in docs:
-        start = _parse_clock(d["time"])
+        try:
+            start = _parse_clock(d["time"])
+        except (KeyError, ValueError, TypeError):
+            continue  # an unreadable old record shouldn't break booking for everyone
         duration = d.get("duration_minutes") or _duration_for_service(d.get("service", ""))
         intervals.append((start, duration))
     return intervals
@@ -425,17 +428,77 @@ async def create_booking(payload: BookingCreate):
     return booking
 
 
-@api_router.get("/bookings", response_model=List[Booking])
-async def list_bookings(date: Optional[str] = None):
-    query = {"date": date} if date else {}
-    docs = await db.bookings.find(query, {"_id": 0}).to_list(1000)
-    for d in docs:
-        if isinstance(d.get('created_at'), str):
-            d['created_at'] = datetime.fromisoformat(d['created_at'])
+def _safe_clock(t) -> datetime:
+    try:
+        return _parse_clock(t)
+    except Exception:
+        return _parse_clock("12:00 AM")
+
+
+def _booking_for_listing(d: dict) -> dict:
+    """Make one stored booking safe to send to the admin dashboard. A single
+    old/odd record (missing phone, odd time text, bad email...) must never
+    make the whole list fail, so anything that doesn't fit the current
+    model is passed through as-is with sensible fallbacks."""
+    d = dict(d)
+    d.pop("_id", None)
+    created = d.get("created_at")
+    if isinstance(created, str):
+        try:
+            d["created_at"] = datetime.fromisoformat(created)
+        except ValueError:
+            d["created_at"] = datetime.now(timezone.utc)
+    try:
+        return Booking(**d).model_dump()
+    except Exception as e:
+        logger.warning(f"Booking {d.get('id')} doesn't match the current format ({e}); listing it as-is")
+        return {
+            "id": str(d.get("id") or uuid.uuid4()),
+            "service": str(d.get("service") or "Unknown"),
+            "date": str(d.get("date") or ""),
+            "time": str(d.get("time") or "12:00 AM"),
+            "name": str(d.get("name") or "Unknown"),
+            "email": str(d.get("email") or ""),
+            "phone": str(d.get("phone") or "N/A"),
+            "notes": str(d.get("notes") or ""),
+            "duration_minutes": d.get("duration_minutes") or DEFAULT_DURATION_MINUTES,
+            "status": str(d.get("status") or "confirmed"),
+            "reminder_sent": bool(d.get("reminder_sent", False)),
+            "created_at": d.get("created_at") if isinstance(d.get("created_at"), datetime) else datetime.now(timezone.utc),
+        }
+
+
+@api_router.get("/bookings")
+async def list_bookings(
+    response: Response,
+    date: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
+    """List bookings. The admin dashboard asks only for the month it is
+    showing (date_from/date_to, both inclusive, 'YYYY-MM-DD'), so the list
+    never has to hold the shop's whole history. With no filter at all it
+    returns the newest bookings (up to a cap) rather than the oldest."""
+    query = {}
+    if date:
+        query["date"] = date
+    elif date_from or date_to:
+        span = {}
+        if date_from:
+            span["$gte"] = date_from
+        if date_to:
+            span["$lte"] = date_to
+        query["date"] = span
+
+    # Newest first, so if a cap is ever hit it is the OLD bookings that get
+    # left out, never the ones people are booking right now.
+    docs = await db.bookings.find(query, {"_id": 0}).sort("date", -1).limit(5000).to_list(5000)
+    bookings = [_booking_for_listing(d) for d in docs]
     # Sort by actual time-of-day, not alphabetically — a plain string sort
     # would put "01:00 PM" before "09:00 AM" since '1' < '9'.
-    docs.sort(key=lambda d: (d.get('date', ''), _parse_clock(d.get('time', '12:00 AM'))))
-    return docs
+    bookings.sort(key=lambda b: (b["date"], _safe_clock(b["time"])))
+    response.headers["Cache-Control"] = "no-store"  # always show the latest
+    return bookings
 
 
 @api_router.get("/bookings/availability")
@@ -545,10 +608,14 @@ async def admin_update_booking(booking_id: str, payload: AdminBookingUpdate, x_a
         {"date": merged['date'], "id": {"$ne": booking_id}, "status": {"$ne": "cancelled"}},
         {"_id": 0, "time": 1, "service": 1, "duration_minutes": 1},
     ).to_list(1000)
-    other_intervals = [
-        (_parse_clock(o['time']), o.get('duration_minutes') or _duration_for_service(o.get('service', '')))
-        for o in others_docs
-    ]
+    other_intervals = []
+    for o in others_docs:
+        try:
+            other_intervals.append(
+                (_parse_clock(o['time']), o.get('duration_minutes') or _duration_for_service(o.get('service', '')))
+            )
+        except (KeyError, ValueError, TypeError):
+            continue
     if any(_ranges_overlap(new_start, new_duration, s, d) for s, d in other_intervals):
         raise HTTPException(status_code=409, detail="That time overlaps another booking.")
 
@@ -612,7 +679,8 @@ async def admin_delete_booking(booking_id: str, x_admin_key: Optional[str] = Hea
 async def list_closed_dates():
     """Public — used by both the customer site and the admin calendar to
     mark manually-closed days (e.g. shop closed for a trip)."""
-    docs = await db.closed_dates.find({}, {"_id": 0}).to_list(1000)
+    # Newest first, so a cap could only ever drop the oldest closures.
+    docs = await db.closed_dates.find({}, {"_id": 0}).sort("date", -1).limit(5000).to_list(5000)
     return docs
 
 
